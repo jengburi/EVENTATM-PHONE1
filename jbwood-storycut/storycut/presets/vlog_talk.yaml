@@ -1,0 +1,36 @@
+# 프리셋 2: 작업실 토크 브이로그
+id: vlog_talk
+name: "작업실 토크 브이로그"
+aspect: "16:9"
+width: 1920
+height: 1080
+target_duration: 900
+min_duration: 420
+story:
+  hook: [0, 20]
+  setup: [20, 90]
+  development: [90, 780]
+  payoff: [780, 900]
+cut:
+  max_pause: 0.7           # 대화 호흡을 살려 천천히
+  keep_pause: 0.35
+  pad_before: 0.10
+  pad_after: 0.18
+  remove_fillers: true
+  remove_soft_fillers: false
+  remove_stutter: true
+  remove_retakes: true
+  loud_gap_keep: 3.0       # 작업 소리는 넉넉히 유지
+captions:
+  burn_in: true
+  font: "Malgun Gothic"
+  font_size: 64
+  outline: 4
+  normal_color: "#FFFFFF"
+  emphasis_color: "#FFD700"
+  outline_color: "#000000"
+  max_lines: 2
+  max_chars_per_line: 22
+  position: bottom
+  safe_area: {top: 60, bottom: 1010, right: 60}
+reframe: fit

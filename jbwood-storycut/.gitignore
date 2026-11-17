@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+output/
+work/
+models/
+*.mp4
+*.wav
+!tests/fixtures/*.json
+env_report.txt

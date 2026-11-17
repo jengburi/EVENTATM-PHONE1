@@ -1,0 +1,10 @@
+# JBWOOD AI StoryCut - Python 패키지
+# FFmpeg는 별도 설치 필요 (install.bat이 안내)
+faster-whisper>=1.0
+PyYAML>=6.0
+numpy>=1.24
+# 2단계(장면 분석)부터 사용
+scenedetect>=0.6
+opencv-python-headless>=4.8
+# 테스트용
+pytest>=7
