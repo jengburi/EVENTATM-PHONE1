@@ -1,0 +1,31 @@
+{
+  "skill_name": "JBWOOD StoryCut",
+  "version": "0.1",
+  "video_format": "9:16",
+  "target_duration": 60,
+  "story": {
+    "hook": [0, 5],
+    "setup": [5, 15],
+    "development": [15, 42],
+    "payoff": [42, 60]
+  },
+  "editing": {
+    "cut_at_sentence_end": true,
+    "remove_repeated_speech": true,
+    "preserve_meaning": true,
+    "detect_silence": true,
+    "select_relevant_broll": true,
+    "avoid_excessive_transitions": true
+  },
+  "captions": {
+    "position": "center_safe_area",
+    "emphasis_color": "#FFD700",
+    "normal_color": "#FFFFFF",
+    "max_lines": 2
+  },
+  "audio": {
+    "preserve_original_voice": true,
+    "use_natural_sound": true,
+    "effects_only_when_relevant": true
+  }
+}
