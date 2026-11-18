@@ -70,7 +70,12 @@ as a professional variety-show editor and decide the details.
 | ending | `ta-da` then `applause` |
 
 Do not stack effects back to back; leave ~0.3 s between captions. Keep the
-original audio (kids' voices) untouched.
+original audio (kids' voices) untouched. Set every sound effect to
+`volume_db: -8` right after adding it (the user found the defaults too loud).
+
+Ask (or check frames for) the moment the kids notice. Before it: suspense
+captions/sounds. After it: chaos/comedy (혼비백산, 전력질주, 대환장 파티) with
+`shake`, `whoosh`, `slide-up/down`, `bloop` - not heartbeat/tick-tock/riser.
 
 ## Reference edit (kids + horse-mask mom prank, 45.8 s)
 
