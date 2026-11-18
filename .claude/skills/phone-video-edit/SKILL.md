@@ -41,7 +41,11 @@ as a professional variety-show editor and decide the details.
 2. Run `auto_captions(language="ko", lines=1, max_chars=14)` and poll `get_status`.
    On phones it runs at about real time. "No speech was recognized" is normal for
    sneaky/prank clips; then use situation captions only.
-3. Sample frames (pattern above) every 3-5 s to find: calm start, first
+3. Ask the user for the story in one line if it isn't obvious (who is doing
+   what and why it's funny). Do not invent a "reveal" or "culprit" angle.
+   Example: mom in a horse mask teasing the kids; "말 아저씨" stays a mystery; the
+   family joke is that 말 아저씨 makes the kids eat dinner and listen.
+4. Sample frames (pattern above) every 3-5 s to find: calm start, first
    appearance, approach, reaction, ending.
 4. Build the edit (the user has said "알아서 재밌게" is fine; ask only if the
    scene order is unclear):
@@ -51,8 +55,13 @@ as a professional variety-show editor and decide the details.
    - Styles: `comic` (yellow, impact moments), `outline-white` (narration),
      `yellow-pop` (punchlines/ending), `mini-vlog` (calm opening).
    - **Stickers**: `scale` **0.25**, corner (x≈780, y≈-650). Default scale covers faces.
-   - **Effects**: `zoom-in` for build-up, `zoom-punch` on the reveal,
-     `speed-lines` (집중선) for the peak, `confetti` at the ending.
+   - **Effects**: do NOT use motion effects (`zoom-in`, `zoom-out`, `zoom-punch`,
+     `shake`, `speed-lines`, etc.) on the phone: in SsamCut mobile they turn the
+     video black for their whole duration (seen in preview and in the export).
+     Overlay effects like `confetti` are fine. Get emphasis from captions,
+     sound effects and stickers instead.
+   - Line breaks in `add_text`/`update_element`: send a real newline, not the two
+     characters backslash-n (that shows up literally on screen).
 5. Check 1-2 frames with the longest caption and any sticker, fix overflow.
 6. Summarize in a table (time, caption, sound/effect). Offer to shift timings,
    cut boring parts, or export. Export only when asked. Never post anywhere.
