@@ -60,11 +60,12 @@ as a professional variety-show editor and decide the details.
 ## Saving (user's standing rule)
 
 All finished edits go to the phone folder **`Claude 편집 영상`** (내장 메모리 root).
-Claude cannot pick folders: `export_video` downloads through Chrome. The user set
-Chrome → 설정 → 다운로드 → "파일 저장 위치 확인" on, so Chrome asks where to save;
-before every export remind them in one line to choose `Claude 편집 영상`.
-If that setting is off, the file lands in `Download`; tell them to move it there
-(내 파일 → 다운로드 → 길게 눌러 이동). Export with `resolution: "1080"`, `fps: "30"`.
+Claude cannot pick folders: `export_video` downloads through Chrome, and on the
+user's Galaxy S24 (no SD slot) Chrome has no "ask where to save" option, so the
+file always lands in `Download` (/storage/emulated/0/Download). After every
+export, tell the user the file name and to move it: 내 파일 → 다운로드 → 길게 눌러
+이동 → 내장 메모리 → Claude 편집 영상 → 여기로 이동.
+Export with `resolution: "1080"`, `fps: "30"`; keep SsamCut on screen meanwhile.
 
 ## Sound effect recipe (SsamCut built-ins)
 
