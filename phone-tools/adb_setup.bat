@@ -1,53 +1,61 @@
 @echo off
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 echo ==============================================
 echo   휴대폰 연결 도구(ADB) 설치 + 연결 확인
 echo ==============================================
 echo.
 
-where adb >nul 2>nul
-if %errorlevel%==0 (
-  echo [OK] ADB가 이미 설치되어 있어요.
-  goto CHECK
-)
+call :FIND_ADB
+if defined ADB goto CHECK
 
 echo ADB를 설치합니다. (구글 공식 Android Platform Tools)
 winget install -e --id Google.PlatformTools --accept-source-agreements --accept-package-agreements
-if not %errorlevel%==0 (
-  echo.
-  echo [!] 자동 설치에 실패했어요. 화면 내용을 캡처해서 Claude에게 보내 주세요.
-  pause
-  exit /b 1
-)
+rem 이미 설치되어 있어도 winget은 오류 코드를 돌려주므로, 설치 결과는 아래에서 직접 확인
+call :FIND_ADB
+if defined ADB goto CHECK
+
 echo.
-echo 설치 완료! 이 창을 닫고 adb_setup.bat 을 한 번 더 더블클릭해 주세요.
-echo (새 창에서 열어야 설치된 ADB가 인식돼요)
+echo [!] ADB를 찾지 못했어요. 화면 내용을 캡처해서 Claude에게 보내 주세요.
 pause
+exit /b 1
+
+:FIND_ADB
+set "ADB="
+for /f "delims=" %%p in ('where adb 2^>nul') do if not defined ADB set "ADB=%%p"
+if defined ADB exit /b 0
+if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\adb.exe" set "ADB=%LOCALAPPDATA%\Microsoft\WinGet\Links\adb.exe"
+if defined ADB exit /b 0
+for /d %%d in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\Google.PlatformTools*") do (
+  if exist "%%d\platform-tools\adb.exe" set "ADB=%%d\platform-tools\adb.exe"
+)
+if defined ADB exit /b 0
+if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
 exit /b 0
 
 :CHECK
-adb version | findstr /C:"Android Debug Bridge"
+echo [OK] ADB 찾음: !ADB!
+"!ADB!" version | findstr /C:"Android Debug Bridge"
 echo.
 echo 휴대폰을 USB로 연결해 주세요.
 echo 휴대폰에 "USB 디버깅을 허용하시겠습니까?" 창이 뜨면 [허용]을 누르세요.
 echo 준비되면 아무 키나 누르세요...
 pause >nul
-adb start-server >nul 2>nul
-adb devices -l > "%~dp0adb_result.txt"
+"!ADB!" start-server >nul 2>nul
+"!ADB!" devices -l > "%~dp0adb_result.txt"
 type "%~dp0adb_result.txt"
 echo.
 findstr /R /C:"device product" "%~dp0adb_result.txt" >nul
-if %errorlevel%==0 (
+if !errorlevel!==0 (
   echo [OK] 휴대폰이 연결됐어요!
-  for /f "delims=" %%m in ('adb shell getprop ro.product.model') do echo      모델: %%m
-  for /f "delims=" %%v in ('adb shell getprop ro.build.version.release') do echo      안드로이드: %%v
-  echo.
-  echo      사진/영상 폴더 개수 확인:
-  adb shell "ls /sdcard/DCIM/Camera | wc -l"
+  for /f "delims=" %%m in ('"!ADB!" shell getprop ro.product.model') do echo      모델: %%m
+  for /f "delims=" %%v in ('"!ADB!" shell getprop ro.build.version.release') do echo      안드로이드: %%v
+  for /f "delims=" %%c in ('"!ADB!" shell "ls /sdcard/DCIM/Camera | wc -l"') do echo      카메라 폴더 파일 수: %%c
+  for /f "delims=" %%s in ('"!ADB!" shell "df -h /sdcard | tail -1"') do echo      저장공간: %%s
   goto END
 )
 findstr /C:"unauthorized" "%~dp0adb_result.txt" >nul
-if %errorlevel%==0 (
+if !errorlevel!==0 (
   echo [!] 휴대폰 화면에서 "USB 디버깅 허용"을 눌러 주세요. 그다음 이 파일을 다시 실행하세요.
   goto END
 )
