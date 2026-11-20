@@ -1,0 +1,36 @@
+# 프리셋 3: 목공 제품 제작 과정
+id: making_process
+name: "목공 제품 제작 과정"
+aspect: "9:16"
+width: 1080
+height: 1920
+target_duration: 90
+min_duration: 30
+story:
+  hook: [0, 3]
+  setup: [3, 10]
+  development: [10, 75]
+  payoff: [75, 90]
+cut:
+  max_pause: 0.3
+  keep_pause: 0.15
+  pad_before: 0.06
+  pad_after: 0.12
+  remove_fillers: true
+  remove_soft_fillers: false
+  remove_stutter: true
+  remove_retakes: true
+  loud_gap_keep: 2.5       # 재단·샌딩 소리가 주인공이므로 유지
+captions:
+  burn_in: true
+  font: "Malgun Gothic"
+  font_size: 72
+  outline: 5
+  normal_color: "#FFFFFF"
+  emphasis_color: "#FFD700"
+  outline_color: "#000000"
+  max_lines: 2
+  max_chars_per_line: 10
+  position: center_safe
+  safe_area: {top: 230, bottom: 1440, right: 230}
+reframe: center_crop

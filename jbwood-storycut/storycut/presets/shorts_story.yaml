@@ -1,0 +1,36 @@
+# 프리셋 1: 스토리텔링 쇼츠
+id: shorts_story
+name: "스토리텔링 쇼츠"
+aspect: "9:16"
+width: 1080
+height: 1920
+target_duration: 60        # 초. 넘으면 계획 단계에서 경고
+min_duration: 45
+story:                     # 2단계 AI 구성에서 사용 (초)
+  hook: [0, 3]
+  setup: [3, 15]
+  development: [15, 45]
+  payoff: [45, 60]
+cut:
+  max_pause: 0.25          # 이보다 긴 말 사이 공백은 줄임
+  keep_pause: 0.12         # 줄인 뒤 남길 공백
+  pad_before: 0.06         # 단어 앞 여유
+  pad_after: 0.10          # 단어 뒤 여유
+  remove_fillers: true     # 어/음 같은 확실한 말버릇 제거
+  remove_soft_fillers: false  # 그/뭐/이제/막 등은 '제안'만
+  remove_stutter: true     # "이거 이거" 같은 단어 반복
+  remove_retakes: true     # 다시 말한 문장(재촬영 발화)
+  loud_gap_keep: 0.6       # 말 없는 구간이 공구 소리 등으로 시끄러우면 최대 이만큼 유지
+captions:
+  burn_in: true
+  font: "Malgun Gothic"     # Windows 기본 한글 글꼴
+  font_size: 72
+  outline: 5
+  normal_color: "#FFFFFF"
+  emphasis_color: "#FFD700"
+  outline_color: "#000000"
+  max_lines: 2
+  max_chars_per_line: 10
+  position: center_safe     # 쇼츠 중앙 안전영역
+  safe_area: {top: 230, bottom: 1440, right: 230}
+reframe: center_crop        # 가로 원본을 9:16으로 중앙 자르기
