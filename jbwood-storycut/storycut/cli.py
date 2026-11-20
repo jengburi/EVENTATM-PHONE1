@@ -33,8 +33,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("plan")
     p.add_argument("--no-burn", action="store_true", help="영상에 자막을 입히지 않음")
     sub.add_parser("presets")
+    p = sub.add_parser("fetch", help="구글 드라이브 공유 링크에서 영상 내려받기")
+    p.add_argument("links", nargs="+")
+    p.add_argument("--out", default="inbox")
 
     a = ap.parse_args(argv)
+    if a.cmd == "fetch":
+        from .fetch import download
+        for link in a.links:
+            print(download(link, a.out, _progress))
+        return 0
     if a.cmd == "presets":
         for k, v in list_presets().items():
             print(f"{k:16s} {v}")

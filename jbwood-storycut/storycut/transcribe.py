@@ -29,6 +29,28 @@ def pick_device() -> tuple[str, str]:
     return "cpu", "int8"
 
 
+def load_audio(path: str | Path, sr: int = 16000):
+    """FFmpeg로 16kHz 모노 float32 배열을 만든다.
+
+    faster-whisper의 기본 디코더(PyAV)는 버전이 맞지 않으면 실패하므로
+    (예: PyAV 19 + faster-whisper 1.2.1), 이미 필요한 FFmpeg로 직접 디코딩한다.
+    """
+    import subprocess
+
+    import numpy as np
+
+    from .media import ffmpeg_bin
+
+    res = subprocess.run(
+        [ffmpeg_bin(), "-nostdin", "-i", str(path), "-vn", "-ac", "1", "-ar", str(sr),
+         "-f", "s16le", "-acodec", "pcm_s16le", "-"],
+        capture_output=True,
+    )
+    if res.returncode != 0:
+        raise RuntimeError("오디오를 읽을 수 없습니다:\n" + res.stderr.decode("utf-8", "replace")[-2000:])
+    return np.frombuffer(res.stdout, np.int16).astype(np.float32) / 32768.0
+
+
 def transcribe(audio_path: str | Path, model_size: str = "medium", language: str = "ko",
                progress: Callable[[float, str], None] | None = None) -> dict:
     from faster_whisper import WhisperModel  # 무거운 import는 필요할 때만
@@ -38,7 +60,7 @@ def transcribe(audio_path: str | Path, model_size: str = "medium", language: str
         progress(0.0, f"음성 인식 모델 불러오는 중 ({model_size}, {device}) - 처음 한 번은 내려받느라 오래 걸려요")
     model = WhisperModel(model_size, device=device, compute_type=compute)
     segments, info = model.transcribe(
-        str(audio_path),
+        load_audio(audio_path),
         language=language,
         word_timestamps=True,
         initial_prompt=VERBATIM_PROMPT,
