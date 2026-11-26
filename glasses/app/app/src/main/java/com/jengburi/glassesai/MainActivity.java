@@ -377,7 +377,12 @@ public class MainActivity extends Activity implements AppCore.Ui {
     }
 
     // ---------- AppCore.Ui ----------
-    @Override public void onLog(String s) { runOnUiThread(() -> logView.setText(core.logText())); }
+    private volatile boolean logPending;
+    @Override public void onLog(String s) {
+        if (logPending) return;
+        logPending = true;
+        logView.postDelayed(() -> { logPending = false; logView.setText(core.logText()); }, 400);
+    }
     @Override public void onAnswer(String s) { runOnUiThread(() -> answer.setText(s)); }
     @Override public void onPhoto(byte[] jpeg) {
         Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);

@@ -118,7 +118,7 @@ public class AppCore {
     // ---------- 기록 / 말하기 ----------
     public synchronized void log(String s) {
         logBuf.insert(0, s + "\n");
-        if (logBuf.length() > 6000) logBuf.setLength(6000);
+        if (logBuf.length() > 3000) logBuf.setLength(3000);
         Ui u = ui; if (u != null) u.onLog(s);
     }
     public synchronized String logText() { return logBuf.toString(); }
@@ -226,7 +226,7 @@ public class AppCore {
         if (interp.running) { interp.stop(); return; }
         if (act == ACT_INTERPRET) { interp.start(false); return; }
         if (act == ACT_LISTEN) { interp.start(true); return; }
-        if (speaking && act != ACT_REPLAY) { stopSpeaking(); log("읽기 멈춤"); return; }
+        if ((speaking || isSpeaking()) && act != ACT_REPLAY) { stopSpeaking(); log("읽기 멈춤"); return; }
         if (act == ACT_REPLAY) { replay(); return; }
         if (act == ACT_VOICE_ONLY || act == ACT_SMART) { smartAsk(source); return; }
         if (act == ACT_CURRENT && prefs.getBoolean("buttonSmart", true)) { smartAsk(source); return; }
@@ -285,7 +285,7 @@ public class AppCore {
                     if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
                     if (photoForChat != null) prompt += "\n\n(앞서 찍은 사진이 함께 첨부돼 있어. 사진 관련 질문이면 이 사진을 보고 답해.)";
                     byte[] newPhoto = null;
-                    String a = askModel(prompt, photoForChat, wav);
+                    String a = askSpoken(prompt, photoForChat, wav);
                     if (a.contains("[끝]")) { say("알겠어요"); return; }
                     if (a.contains("[듣기통역")) {
                         prefs.edit().putBoolean("interpSummary", a.contains("요약")).apply();
@@ -305,13 +305,13 @@ public class AppCore {
                         if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
                         String p2 = prompt(mode()) + "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 사진을 보고 그 질문에 먼저 답해 줘. 질문을 다시 적지 마.";
                         if (past.length() > 0) p2 += "\n\n지금까지 대화:\n" + past;
-                        a = askModel(p2, jpeg, wav).replace("[사진]", "").trim();
+                        a = askSpoken(p2, jpeg, wav).replace("[사진]", "").trim();
                     }
                     answer(a);
                     History.save(ctx, newPhoto, "그냥 물어보기", "(음성 질문)", a, toGallery());
                     Ui u = ui; if (u != null) u.onHistoryChanged();
                     past.append("사용자: (음성 질문)\nAI: ").append(a).append("\n");
-                    boolean finished = sayAndWait(a, 180);
+                    boolean finished = waitSpeechDone(180);
                     if (!finished || !prefs.getBoolean("smartFollow", true)) return;
                     log("더 물어보실 게 있으면 삐 소리 뒤에 말씀하세요");
                 }
@@ -326,6 +326,65 @@ public class AppCore {
     }
 
     private volatile int pendingInterp;
+
+    /** 대답이 만들어지는 대로 문장 단위로 바로 읽어 주는 장치. [사진] 같은 신호는 읽지 않음. */
+    class StreamSpeaker implements Gemini.TextSink {
+        final StringBuilder buf = new StringBuilder();
+        boolean decided, tag; int spoken;
+        @Override public void onText(String d) {
+            buf.append(d);
+            if (!decided) {
+                String t = buf.toString().trim();
+                if (t.isEmpty()) return;
+                if (t.startsWith("[") || t.startsWith("STOP") || t.startsWith("none")) {
+                    if (t.contains("]") || t.length() > 24) { decided = true; tag = isTag(t); } else return;
+                } else decided = true;
+            }
+            if (!tag) flush(false);
+        }
+        void finish() {
+            if (!decided) { decided = true; tag = isTag(buf.toString().trim()); }
+            if (!tag) flush(true);
+        }
+        void flush(boolean end) {
+            String t = buf.substring(spoken);
+            int idx = -1;
+            for (int i = 0; i < t.length(); i++) { char c = t.charAt(i); if (c == '.' || c == '?' || c == '!' || c == '。' || c == '\n') idx = i; }
+            if (end) idx = t.length() - 1;
+            if (idx < 0) return;
+            String sent = t.substring(0, idx + 1).trim();
+            spoken += idx + 1;
+            if (sent.length() > 0) speakQueued(sent, Locale.KOREAN);
+        }
+    }
+    static boolean isTag(String t) {
+        return t.startsWith("[사진") || t.startsWith("[끝") || t.startsWith("[통역") || t.startsWith("[듣기통역") || t.startsWith("STOP") || t.startsWith("none");
+    }
+
+    /** 스트리밍으로 묻고, 문장이 나오는 대로 읽기 시작. 전체 대답을 돌려줌. */
+    String askSpoken(String prompt, byte[] jpeg, byte[] wav) throws Exception {
+        StreamSpeaker sp = new StreamSpeaker();
+        stopSpeaking();
+        speaking = true;
+        Gemini.SINK.set(sp);
+        try { String a = askModel(prompt, jpeg, wav); sp.finish(); return a; }
+        finally { Gemini.SINK.remove(); }
+    }
+
+    /** 읽기가 끝날 때까지 기다림. 중간에 멈추면 false. */
+    boolean waitSpeechDone(int sec) {
+        long end = System.currentTimeMillis() + sec * 1000L;
+        try { Thread.sleep(300); } catch (InterruptedException ignored) { }
+        while (System.currentTimeMillis() < end && speaking && isSpeaking()) {
+            try { Thread.sleep(200); } catch (InterruptedException ignored) { }
+        }
+        boolean ok = speaking;
+        speaking = false;
+        return ok;
+    }
+
+    /** conversation() 용: 모델 전환 기억 없이 스트리밍 */
+    String askSpokenRaw(String prompt, byte[] jpeg, byte[] wav) throws Exception { return askSpoken(prompt, jpeg, wav); }
 
     String askModel(String prompt, byte[] jpeg, byte[] wav) throws Exception {
         log("Gemini에게 물어보는 중…");
@@ -380,20 +439,19 @@ public class AppCore {
         ble.connect();
             say("찍을게요");
             ble.takePhoto();
-            Thread.sleep(1500);
+            Thread.sleep(500);
             if (!locationOn()) throw new Exception("휴대폰 위치(GPS)를 켜 주세요. 꺼져 있으면 안경 와이파이를 못 찾아요");
             String ssid = ble.wifiOn();
             byte[] jpeg;
             try {
-                log("안경 와이파이가 켜질 때까지 5초 기다리는 중…");
-                Thread.sleep(5000);
+                Thread.sleep(1500); // 안경 와이파이가 켜질 시간 (연결 요청이 뜰 때까지 알아서 기다림)
                 try {
                     wifi.connect(ssid);
                 } catch (Exception first) {
                     log("1차 연결 실패: " + first.getMessage() + " → 다시 시도");
                     wifi.disconnect();
                     ssid = ble.wifiOn();
-                    Thread.sleep(6000);
+                    Thread.sleep(4000);
                     wifi.connect(ssid);
                 }
                 String name = wifi.latestPhoto();
@@ -445,7 +503,7 @@ public class AppCore {
             if (turn == 0) say("분석 중이에요");
             log("Gemini에게 물어보는 중… (" + modeName + (ql != null ? ", " + ql : "") + ")");
             Gemini.lastFallbackModel = null;
-            String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, wav, this::log);
+            String a = askSpokenRaw(prompt, jpeg, wav);
             if (a.contains("[끝]")) { say("알겠어요"); return; }
             String fb = Gemini.lastFallbackModel;
             if (fb != null && !models().contains(fb)) prefs.edit().putString("model", fb + ", " + models()).apply();
@@ -455,8 +513,8 @@ public class AppCore {
             Ui u = ui; if (u != null) u.onHistoryChanged();
             past.append(ql != null ? "사용자: " + ql + "\n" : "").append("AI: ").append(a).append("\n");
 
-            if (!followUp()) { say(a); return; }
-            boolean finished = sayAndWait(a, 180);
+            if (!followUp()) { waitSpeechDone(180); return; }
+            boolean finished = waitSpeechDone(180);
             if (!finished) return; // 읽다가 멈추면 대화 끝
             sayAndWait("더 궁금한 거 있으세요?", 5);
             q = listenQuestion(6);

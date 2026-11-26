@@ -88,7 +88,26 @@ public class Gemini {
         return ask(apiKey, model, prompt, jpeg, null);
     }
 
+    /** 글자가 조금씩 도착할 때마다 받는 곳 (스트리밍). 스레드마다 따로 설정. */
+    public interface TextSink { void onText(String delta); }
+    public static final ThreadLocal<TextSink> SINK = new ThreadLocal<>();
+    /** 이 모델이 생각 설정(thinkingConfig)을 거부하면 true */
+    static volatile boolean noThinkingCfg;
+
     public static String ask(String apiKey, String model, String prompt, byte[] jpeg, byte[] wav) throws Exception {
+        try {
+            return askOnce(apiKey, model, prompt, jpeg, wav, !noThinkingCfg);
+        } catch (Exception e) {
+            String m = String.valueOf(e.getMessage()).toLowerCase();
+            if (!noThinkingCfg && m.contains(" 400") && m.contains("think")) {
+                noThinkingCfg = true;
+                return askOnce(apiKey, model, prompt, jpeg, wav, false);
+            }
+            throw e;
+        }
+    }
+
+    static String askOnce(String apiKey, String model, String prompt, byte[] jpeg, byte[] wav, boolean thinkLow) throws Exception {
         JSONArray parts0 = new JSONArray().put(new JSONObject().put("text", prompt));
         if (jpeg != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
                 .put("mime_type", "image/jpeg")
@@ -98,9 +117,13 @@ public class Gemini {
                 .put("data", Base64.encodeToString(wav, Base64.NO_WRAP))));
         JSONObject body = new JSONObject().put("contents", new JSONArray()
                 .put(new JSONObject().put("parts", parts0)));
+        if (thinkLow) body.put("generationConfig", new JSONObject()
+                .put("thinkingConfig", new JSONObject().put("thinkingLevel", "low")));
 
+        TextSink sink = SINK.get();
+        String method = sink != null ? ":streamGenerateContent?alt=sse" : ":generateContent";
         URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
-                + URLEncoder.encode(model, "UTF-8") + ":generateContent");
+                + URLEncoder.encode(model, "UTF-8") + method);
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
         c.setRequestMethod("POST");
         c.setConnectTimeout(20000); c.setReadTimeout(60000);
@@ -110,19 +133,50 @@ public class Gemini {
         try (OutputStream o = c.getOutputStream()) { o.write(body.toString().getBytes("UTF-8")); }
         int code = c.getResponseCode();
         InputStream in = code < 400 ? c.getInputStream() : c.getErrorStream();
-        ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192]; int n;
-        while (in != null && (n = in.read(buf)) > 0) bo.write(buf, 0, n);
-        String resp = bo.toString("UTF-8");
         if (code >= 400) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192]; int n;
+            while (in != null && (n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            String resp = bo.toString("UTF-8");
             String msg = resp;
             try { msg = new JSONObject(resp).getJSONObject("error").getString("message"); } catch (Exception ignored) { }
             throw new Exception("Gemini 오류 " + code + ": " + msg);
         }
-        JSONArray parts = new JSONObject(resp).getJSONArray("candidates")
-                .getJSONObject(0).getJSONObject("content").getJSONArray("parts");
+        if (sink == null) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            return textOf(new JSONObject(bo.toString("UTF-8"))).trim();
+        }
+        // 스트리밍: "data: {...}" 줄마다 글자 조각이 옴
+        StringBuilder all = new StringBuilder();
+        java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(in, "UTF-8"));
+        String line;
+        while ((line = r.readLine()) != null) {
+            if (!line.startsWith("data:")) continue;
+            String json = line.substring(5).trim();
+            if (json.isEmpty()) continue;
+            try {
+                String t = textOf(new JSONObject(json));
+                if (!t.isEmpty()) { all.append(t); sink.onText(t); }
+            } catch (Exception ignored) { }
+        }
+        return all.toString().trim();
+    }
+
+    static String textOf(JSONObject resp) throws Exception {
+        JSONArray cands = resp.optJSONArray("candidates");
+        if (cands == null || cands.length() == 0) return "";
+        JSONObject content = cands.getJSONObject(0).optJSONObject("content");
+        if (content == null) return "";
+        JSONArray parts = content.optJSONArray("parts");
+        if (parts == null) return "";
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < parts.length(); i++) sb.append(parts.getJSONObject(i).optString("text"));
-        return sb.toString().trim();
+        for (int i = 0; i < parts.length(); i++) {
+            JSONObject p = parts.getJSONObject(i);
+            if (p.optBoolean("thought", false)) continue; // 생각 내용은 빼기
+            sb.append(p.optString("text"));
+        }
+        return sb.toString();
     }
 }
