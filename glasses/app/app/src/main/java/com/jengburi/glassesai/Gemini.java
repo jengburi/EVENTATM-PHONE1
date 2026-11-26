@@ -81,12 +81,12 @@ public class Gemini {
     }
 
     public static String ask(String apiKey, String model, String prompt, byte[] jpeg) throws Exception {
-        JSONObject img = new JSONObject().put("inline_data", new JSONObject()
+        JSONArray parts0 = new JSONArray().put(new JSONObject().put("text", prompt));
+        if (jpeg != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
                 .put("mime_type", "image/jpeg")
-                .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP)));
-        JSONObject txt = new JSONObject().put("text", prompt);
+                .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))));
         JSONObject body = new JSONObject().put("contents", new JSONArray()
-                .put(new JSONObject().put("parts", new JSONArray().put(txt).put(img))));
+                .put(new JSONObject().put("parts", parts0)));
 
         URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
                 + URLEncoder.encode(model, "UTF-8") + ":generateContent");

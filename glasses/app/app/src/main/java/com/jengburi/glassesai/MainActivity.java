@@ -25,13 +25,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity implements AppCore.Ui {
+    static final float[] RATES = {0.9f, 1.0f, 1.3f, 1.6f};
+    static final String[] RATE_NAMES = {"천천히", "보통", "빠르게", "아주 빠르게"};
+
     private AppCore core;
-    private EditText keyEdit, modelEdit, promptEdit, triggerEdit;
-    private Button goBtn, againBtn, serviceBtn;
-    private CheckBox voiceBox, mediaBox;
-    private RadioGroup modeGroup;
+    private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
+    private Button goBtn, againBtn, voiceBtn, serviceBtn;
+    private CheckBox voiceBox, mediaBox, followBox, galleryBox;
+    private RadioGroup modeGroup, rateGroup;
     private ImageView photo;
     private TextView answer, logView;
+    private LinearLayout historyList;
+    private ScrollView scroll;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -49,6 +54,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         if (core.lastJpeg != null) onPhoto(core.lastJpeg);
         onBusy(core.busy);
         updateServiceBtn();
+        refreshHistory();
     }
 
     @Override protected void onPause() {
@@ -59,37 +65,36 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
     private void buildUi() {
         int pad = dp(16);
-        ScrollView sv = new ScrollView(this);
+        scroll = new ScrollView(this);
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(pad, pad, pad, pad);
-        sv.addView(col);
+        scroll.addView(col);
 
         TextView title = new TextView(this);
         title.setText("안경 AI (S1Pro + Gemini)");
         title.setTextSize(22);
         col.addView(title);
 
-        goBtn = new Button(this);
-        goBtn.setText("📸  안경으로 찍고 설명 듣기");
-        goBtn.setTextSize(20);
-        goBtn.setMinHeight(dp(96));
+        goBtn = bigButton(col, "📸  안경으로 찍고 설명 듣기", 96);
         goBtn.setOnClickListener(v -> { saveFields(); core.trigger("화면 버튼"); });
-        col.addView(goBtn, new LinearLayout.LayoutParams(-1, -2));
 
-        againBtn = new Button(this);
-        againBtn.setText("🔁 방금 사진으로 다시 물어보기");
+        LinearLayout row = new LinearLayout(this);
+        col.addView(row);
+        againBtn = rowButton(row, "🔁 다시 묻기");
         againBtn.setOnClickListener(v -> { saveFields(); core.askAgain(); });
-        col.addView(againBtn, new LinearLayout.LayoutParams(-1, -2));
-
-        Button stopBtn = new Button(this);
-        stopBtn.setText("🔇 읽기 멈추기");
+        Button replayBtn = rowButton(row, "🔊 다시 듣기");
+        replayBtn.setOnClickListener(v -> core.replay());
+        Button stopBtn = rowButton(row, "🔇 멈추기");
         stopBtn.setOnClickListener(v -> core.stopSpeaking());
-        col.addView(stopBtn, new LinearLayout.LayoutParams(-1, -2));
+
+        voiceBtn = bigButton(col, "🎤 사진 없이 말로만 물어보기", 56);
+        voiceBtn.setOnClickListener(v -> { saveFields(); core.voiceOnly("화면 버튼"); });
 
         answer = new TextView(this);
         answer.setTextSize(18);
         answer.setPadding(0, dp(12), 0, dp(12));
+        answer.setTextIsSelectable(true);
         col.addView(answer);
 
         photo = new ImageView(this);
@@ -117,10 +122,22 @@ public class MainActivity extends Activity implements AppCore.Ui {
         promptEdit.setHint("AI에게 할 말을 직접 적어 주세요");
         col.addView(promptEdit);
 
-        voiceBox = new CheckBox(this);
-        voiceBox.setText("🎤 찍은 뒤 말로 질문하기 (안경 마이크)");
-        voiceBox.setOnCheckedChangeListener((v, c) -> core.prefs.edit().putBoolean("voice", c).apply());
-        col.addView(voiceBox);
+        // --- 대화 ---
+        col.addView(section("대화"));
+        voiceBox = check(col, "🎤 찍은 뒤 말로 질문하기 (안경 마이크)", "voice", false);
+        followBox = check(col, "💬 연속 대화 (대답 뒤 \"더 궁금한 거 있으세요?\" → 이어서 질문, \"없어\"라고 하면 끝)", "followUp", false);
+        galleryBox = check(col, "🖼 찍은 사진을 휴대폰 갤러리에도 저장 (Pictures/GlassesAI)", "gallery", true);
+        col.addView(label("읽는 속도"));
+        rateGroup = new RadioGroup(this);
+        rateGroup.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < RATES.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(2000 + i);
+            rb.setText(RATE_NAMES[i]);
+            rateGroup.addView(rb);
+        }
+        rateGroup.setOnCheckedChangeListener((g, id) -> core.prefs.edit().putFloat("rate", RATES[id - 2000]).apply());
+        col.addView(rateGroup);
 
         // --- 안경 버튼 ---
         col.addView(section("안경 버튼으로 실행"));
@@ -131,14 +148,28 @@ public class MainActivity extends Activity implements AppCore.Ui {
             serviceBtn.postDelayed(this::updateServiceBtn, 500);
         });
         col.addView(serviceBtn, new LinearLayout.LayoutParams(-1, -2));
-        mediaBox = new CheckBox(this);
-        mediaBox.setText("안경 터치(재생/일시정지 신호)로도 실행");
-        mediaBox.setOnCheckedChangeListener((v, c) -> core.prefs.edit().putBoolean("mediaKey", c).apply());
-        col.addView(mediaBox);
-        col.addView(label("실행할 안경 신호 번호 (아래 기록의 '안경 신호: XX' 값, 여러 개는 쉼표)"));
-        triggerEdit = new EditText(this);
-        triggerEdit.setSingleLine();
-        col.addView(triggerEdit);
+        TextView help = label("버튼에 붙일 수 있는 동작: 자동 / 번역 / 문제 풀이 / 설명 / 쟁부리우드 제품 / 직접 입력 / 다시듣기 / 말로만\n"
+                + "(비워 두면 위에서 고른 모드, AI가 읽는 중에 누르면 읽기 멈춤)");
+        help.setTextColor(Color.GRAY);
+        col.addView(help);
+        col.addView(label("안경 블루투스 신호 → 동작  (예: 97  또는  97:번역, 51:다시듣기)"));
+        triggerEdit = edit(col);
+        mediaBox = check(col, "안경 터치(재생 신호)도 사용", "mediaKey", true);
+        col.addView(label("재생/일시정지 신호 → 동작 (비우면 현재 모드)"));
+        playEdit = edit(col);
+        col.addView(label("다음 곡 신호 → 동작"));
+        nextEdit = edit(col);
+        col.addView(label("이전 곡 신호 → 동작"));
+        prevEdit = edit(col);
+        TextView note = label("※ 버튼 설정을 바꾼 뒤에는 대기를 껐다 켜 주세요. 어떤 버튼이 어떤 신호인지는 아래 진행 기록에 찍혀요.");
+        note.setTextColor(Color.GRAY);
+        col.addView(note);
+
+        // --- 기록 ---
+        col.addView(section("지난 기록 (누르면 크게 보기)"));
+        historyList = new LinearLayout(this);
+        historyList.setOrientation(LinearLayout.VERTICAL);
+        col.addView(historyList);
 
         // --- 설정 ---
         col.addView(section("설정"));
@@ -147,17 +178,53 @@ public class MainActivity extends Activity implements AppCore.Ui {
         keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         col.addView(keyEdit);
         col.addView(label("모델 이름 (쉼표로 여러 개, 앞에서부터 시도)"));
-        modelEdit = new EditText(this);
-        modelEdit.setSingleLine();
-        col.addView(modelEdit);
+        modelEdit = edit(col);
 
         col.addView(section("진행 기록"));
         logView = new TextView(this);
         logView.setTextSize(12);
         logView.setTextColor(Color.GRAY);
+        logView.setTextIsSelectable(true);
         col.addView(logView);
 
-        setContentView(sv);
+        setContentView(scroll);
+    }
+
+    private Button bigButton(LinearLayout col, String text, int minDp) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(minDp > 80 ? 20 : 16);
+        b.setMinHeight(dp(minDp));
+        col.addView(b, new LinearLayout.LayoutParams(-1, -2));
+        return b;
+    }
+
+    private Button rowButton(LinearLayout row, String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        row.addView(b, new LinearLayout.LayoutParams(0, -2, 1f));
+        return b;
+    }
+
+    private CheckBox check(LinearLayout col, String text, String key, boolean def) {
+        CheckBox c = new CheckBox(this);
+        c.setText(text);
+        c.setTag(new Object[]{key, def});
+        c.setOnCheckedChangeListener((v, on) -> core.prefs.edit().putBoolean(key, on).apply());
+        col.addView(c);
+        return c;
+    }
+
+    private EditText edit(LinearLayout col) {
+        EditText e = new EditText(this);
+        e.setSingleLine();
+        col.addView(e);
+        return e;
+    }
+
+    private void loadCheck(CheckBox c) {
+        Object[] t = (Object[]) c.getTag();
+        c.setChecked(core.prefs.getBoolean((String) t[0], (Boolean) t[1]));
     }
 
     private void loadFields() {
@@ -165,10 +232,16 @@ public class MainActivity extends Activity implements AppCore.Ui {
         modelEdit.setText(core.models());
         promptEdit.setText(core.prefs.getString("customPrompt", AppCore.MODE_PROMPTS[0]));
         triggerEdit.setText(core.triggerCodes());
-        voiceBox.setChecked(core.voiceQuestion());
-        mediaBox.setChecked(core.prefs.getBoolean("mediaKey", true));
+        playEdit.setText(core.prefs.getString("actPlay", ""));
+        nextEdit.setText(core.prefs.getString("actNext", "번역"));
+        prevEdit.setText(core.prefs.getString("actPrev", "다시듣기"));
+        loadCheck(voiceBox); loadCheck(followBox); loadCheck(galleryBox); loadCheck(mediaBox);
         modeGroup.check(1000 + core.mode());
         promptEdit.setVisibility(core.mode() == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
+        float r = core.prefs.getFloat("rate", 1.0f);
+        int ri = 1;
+        for (int i = 0; i < RATES.length; i++) if (Math.abs(RATES[i] - r) < 0.01) ri = i;
+        rateGroup.check(2000 + ri);
     }
 
     private void saveFields() {
@@ -177,11 +250,38 @@ public class MainActivity extends Activity implements AppCore.Ui {
                 .putString("model", modelEdit.getText().toString().trim())
                 .putString("customPrompt", promptEdit.getText().toString().trim())
                 .putString("triggers", triggerEdit.getText().toString().trim())
+                .putString("actPlay", playEdit.getText().toString().trim())
+                .putString("actNext", nextEdit.getText().toString().trim())
+                .putString("actPrev", prevEdit.getText().toString().trim())
                 .apply();
     }
 
     private void updateServiceBtn() {
         serviceBtn.setText(GlassesService.running ? "🟢 안경 버튼 대기 중 (누르면 끄기)" : "⚪ 안경 버튼 대기 켜기");
+    }
+
+    private void refreshHistory() {
+        historyList.removeAllViews();
+        List<History.Entry> list = History.list(this, 30);
+        if (list.isEmpty()) { historyList.addView(label("아직 기록이 없어요")); return; }
+        for (History.Entry e : list) {
+            TextView t = new TextView(this);
+            String q = e.question == null || e.question.isEmpty() ? "" : " · 질문: " + e.question;
+            String a = e.answer.length() > 60 ? e.answer.substring(0, 60) + "…" : e.answer;
+            t.setText((e.photo != null ? "📷 " : "💬 ") + e.time + " [" + e.mode + "]" + q + "\n" + a);
+            t.setPadding(0, dp(8), 0, dp(8));
+            t.setOnClickListener(v -> {
+                answer.setText(e.answer);
+                core.lastAnswer = e.answer;
+                if (e.photo != null) {
+                    Bitmap bmp = BitmapFactory.decodeFile(e.photo.getAbsolutePath());
+                    photo.setImageBitmap(bmp);
+                    try { core.lastJpeg = java.nio.file.Files.readAllBytes(e.photo.toPath()); } catch (Exception ignored) { }
+                }
+                scroll.smoothScrollTo(0, 0);
+            });
+            historyList.addView(t);
+        }
     }
 
     private TextView section(String s) {
@@ -226,6 +326,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         runOnUiThread(() -> photo.setImageBitmap(bmp));
     }
     @Override public void onBusy(boolean b) {
-        runOnUiThread(() -> { goBtn.setEnabled(!b); againBtn.setEnabled(!b); });
+        runOnUiThread(() -> { goBtn.setEnabled(!b); againBtn.setEnabled(!b); voiceBtn.setEnabled(!b); });
     }
+    @Override public void onHistoryChanged() { runOnUiThread(this::refreshHistory); }
 }

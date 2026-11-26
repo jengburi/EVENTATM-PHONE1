@@ -75,7 +75,15 @@ public class GlassesService extends Service {
                     core.log("재생 버튼 신호: " + KeyEvent.keyCodeToString(k));
                     if (k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_HEADSETHOOK
                             || k == KeyEvent.KEYCODE_MEDIA_PLAY || k == KeyEvent.KEYCODE_MEDIA_PAUSE) {
-                        if (core.busy) core.stopSpeaking(); else core.trigger("안경 터치");
+                        core.action("안경 터치", AppCore.parseAction(core.prefs.getString("actPlay", "")));
+                        return true;
+                    }
+                    if (k == KeyEvent.KEYCODE_MEDIA_NEXT) {
+                        core.action("안경 다음 버튼", AppCore.parseAction(core.prefs.getString("actNext", "번역")));
+                        return true;
+                    }
+                    if (k == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                        core.action("안경 이전 버튼", AppCore.parseAction(core.prefs.getString("actPrev", "다시듣기")));
                         return true;
                     }
                 }
@@ -83,7 +91,8 @@ public class GlassesService extends Service {
             }
         });
         session.setPlaybackState(new PlaybackState.Builder()
-                .setActions(PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE)
+                .setActions(PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
+                        | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
                 .setState(PlaybackState.STATE_PAUSED, 0, 1f).build());
         session.setActive(true);
         playSilence(); // 미디어 버튼이 이 앱으로 오도록 아주 짧게 무음 재생
