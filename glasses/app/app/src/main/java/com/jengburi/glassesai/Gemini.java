@@ -14,6 +14,28 @@ import java.net.URLEncoder;
 
 /** Google Gemini API 로 사진 + 질문을 보내고 답을 받는다. */
 public class Gemini {
+    /** 503/429(혼잡)이면 잠시 쉬고 재시도, 모델 칸에 쉼표로 여러 개 적으면 차례로 시도. */
+    public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, GlassesBle.Log log) throws Exception {
+        Exception last = null;
+        for (String model : models.split(",")) {
+            model = model.trim();
+            if (model.isEmpty()) continue;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    return ask(apiKey, model, prompt, jpeg);
+                } catch (Exception e) {
+                    last = e;
+                    String m = String.valueOf(e.getMessage());
+                    boolean busy = m.contains(" 503") || m.contains(" 429") || m.contains(" 500");
+                    if (!busy) break;
+                    log.log(model + " 혼잡 → " + (attempt * 3) + "초 후 다시 시도 (" + attempt + "/3)");
+                    Thread.sleep(attempt * 3000L);
+                }
+            }
+        }
+        throw last != null ? last : new Exception("모델 이름이 비어 있어요");
+    }
+
     public static String ask(String apiKey, String model, String prompt, byte[] jpeg) throws Exception {
         JSONObject img = new JSONObject().put("inline_data", new JSONObject()
                 .put("mime_type", "image/jpeg")

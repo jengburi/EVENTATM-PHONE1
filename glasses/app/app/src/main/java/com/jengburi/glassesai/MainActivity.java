@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
     private GlassesBle ble;
     private GlassesWifi wifi;
     private volatile boolean busy;
+    private volatile byte[] lastJpeg;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -99,6 +100,11 @@ public class MainActivity extends Activity {
         promptEdit.setGravity(Gravity.TOP);
         promptEdit.setText(prefs.getString("prompt", DEFAULT_PROMPT));
         col.addView(promptEdit);
+
+        Button againBtn = new Button(this);
+        againBtn.setText("🔁 방금 사진으로 다시 물어보기");
+        againBtn.setOnClickListener(v -> askAgain());
+        col.addView(againBtn);
 
         Button stopBtn = new Button(this);
         stopBtn.setText("읽기 멈추기");
@@ -185,6 +191,7 @@ public class MainActivity extends Activity {
                 wifi.disconnect();
                 ble.transferEnd();
             }
+            lastJpeg = jpeg;
             Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
             runOnUiThread(() -> photo.setImageBitmap(bmp));
 
@@ -192,7 +199,7 @@ public class MainActivity extends Activity {
             if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
             say("분석 중이에요");
             log("Gemini에게 물어보는 중…");
-            String a = Gemini.ask(key, model, prompt, jpeg);
+            String a = Gemini.askWithRetry(key, model, prompt, jpeg, this::log);
             runOnUiThread(() -> answer.setText(a));
             log("답변 받음");
             say(a);
@@ -205,6 +212,33 @@ public class MainActivity extends Activity {
             busy = false;
             runOnUiThread(() -> goBtn.setEnabled(true));
         }
+    }
+
+    private void askAgain() {
+        if (busy) return;
+        byte[] jpeg = lastJpeg;
+        if (jpeg == null) { answer.setText("아직 찍은 사진이 없어요. 위 버튼으로 먼저 찍어 주세요."); return; }
+        String key = keyEdit.getText().toString().trim();
+        String model = modelEdit.getText().toString().trim();
+        String prompt = promptEdit.getText().toString().trim();
+        prefs.edit().putString("key", key).putString("model", model).putString("prompt", prompt).apply();
+        busy = true;
+        goBtn.setEnabled(false);
+        answer.setText("다시 물어보는 중…");
+        new Thread(() -> {
+            try {
+                String a = Gemini.askWithRetry(key, model, prompt, jpeg, this::log);
+                runOnUiThread(() -> answer.setText(a));
+                say(a);
+            } catch (Exception e) {
+                String m = String.valueOf(e.getMessage());
+                runOnUiThread(() -> answer.setText("오류: " + m));
+                say("오류가 났어요");
+            } finally {
+                busy = false;
+                runOnUiThread(() -> goBtn.setEnabled(true));
+            }
+        }).start();
     }
 
     private boolean locationOn() {
