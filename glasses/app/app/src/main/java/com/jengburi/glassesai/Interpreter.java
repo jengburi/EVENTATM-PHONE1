@@ -119,55 +119,76 @@ public class Interpreter {
 
     // ---------------- 듣기 통역 (뉴스/강의) ----------------
     private void listenLoop() {
-        LinkedBlockingQueue<byte[]> chunks = new LinkedBlockingQueue<>();
-        final long[] lastVoice = {System.currentTimeMillis()};
         boolean summary = core.prefs.getBoolean("interpSummary", false);
         boolean glassesMic = core.prefs.getBoolean("interpGlassesMic", false);
-        core.sayAndWait(summary ? "요약 통역을 시작할게요" : "듣기 통역을 시작할게요", 6);
-        Thread rec = new Thread(() -> AudioQ.stream(core.ctx, glassesMic, () -> running,
-                wav -> { chunks.offer(wav); lastVoice[0] = System.currentTimeMillis(); }, core::log));
-        rec.start();
-        StringBuilder prev = new StringBuilder();
+        String saved = "";
         try {
-            while (running) {
-                byte[] wav = chunks.poll(1, TimeUnit.SECONDS);
-                if (wav == null) {
-                    if (System.currentTimeMillis() - lastVoice[0] > 120000) { core.say("소리가 없어서 통역을 끝낼게요"); break; }
-                    continue;
-                }
-                // 번역이 밀리면 쌓인 조각을 합쳐서 한 번에 (요약 모드로)
-                boolean behind = chunks.size() >= 2;
-                if (behind) {
-                    java.io.ByteArrayOutputStream all = new java.io.ByteArrayOutputStream();
-                    all.write(wav, 44, wav.length - 44);
-                    byte[] more;
-                    while ((more = chunks.poll()) != null) all.write(more, 44, more.length - 44);
-                    wav = AudioQ.wav(all.toByteArray());
-                    core.log("말이 빨라서 몇 조각을 합쳐 요약 통역");
-                }
-                String context = prev.length() > 300 ? prev.substring(prev.length() - 300) : prev.toString();
-                String prompt = "첨부 오디오는 뉴스, 강의, 방송 같은 연속된 말의 한 조각(몇 초)이야.\n"
-                        + ((summary || behind)
-                            ? "들린 내용의 핵심만 자연스러운 한국어로 아주 짧게 전해 줘.\n"
-                            : "들린 말을 자연스러운 한국어로 번역해 줘. 원래 한국어면 그대로 짧게 정리해.\n")
-                        + "조각 앞뒤가 문장 중간에서 잘렸을 수 있어. 바로 앞 조각 번역은 다음과 같아: \"" + context + "\"\n"
-                        + "앞 번역과 겹치는 내용은 빼고 이어지는 부분만 써. 설명, 따옴표, 기호 없이 번역문만.\n"
-                        + "말소리가 없거나 음악/잡음뿐이면 none 이라고만 답해.";
-                String t;
-                try { t = core.askModel(prompt, null, wav).trim(); }
-                catch (Exception e) { core.log("이 조각은 건너뜀: " + e.getMessage()); continue; }
-                if (t.isEmpty() || t.equalsIgnoreCase("none")) continue;
-                prev.append(' ').append(t);
-                core.answer(prev.length() > 800 ? "…" + prev.substring(prev.length() - 800) : prev.toString().trim());
-                core.speakQueued(t, Locale.KOREAN);
+            core.sayAndWait(summary ? "요약 통역을 시작할게요" : "듣기 통역을 시작할게요", 6);
+            if (core.prefs.getBoolean("liveMode", true)) {
+                LiveTranslator lt = new LiveTranslator(core);
+                if (lt.run(() -> running, summary, glassesMic)) { saved = lt.all.toString().trim(); return; }
             }
+            saved = chunkLoop(summary, glassesMic);
         } catch (Exception e) {
             core.log("듣기 통역 오류: " + e.getMessage());
         } finally {
             running = false;
-            if (prev.length() > 0) History.save(core.ctx, null, "듣기 통역", null, prev.toString().trim(), false);
+            if (!saved.isEmpty()) History.save(core.ctx, null, "듣기 통역", null, saved, false);
             if (core.ui != null) core.ui.onHistoryChanged();
             core.setBusy(false);
         }
+    }
+
+    /** 기존 방식: 짧은 조각으로 잘라 최대 3개를 동시에 번역하고, 순서대로 읽기. */
+    private String chunkLoop(boolean summary, boolean glassesMic) throws Exception {
+        final long[] lastVoice = {System.currentTimeMillis()};
+        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        final java.util.concurrent.ConcurrentHashMap<Integer, String> results = new java.util.concurrent.ConcurrentHashMap<>();
+        final int[] nextIn = {0};
+        final StringBuilder prev = new StringBuilder();
+        Thread rec = new Thread(() -> AudioQ.stream(core.ctx, glassesMic, () -> running, wav -> {
+            lastVoice[0] = System.currentTimeMillis();
+            final int seq;
+            synchronized (nextIn) { seq = nextIn[0]++; }
+            final String context;
+            synchronized (prev) { context = prev.length() > 200 ? prev.substring(prev.length() - 200) : prev.toString(); }
+            pool.submit(() -> {
+                String prompt = "첨부 오디오는 뉴스, 강의, 방송 같은 연속된 말의 짧은 한 조각(몇 초)이야.\n"
+                        + (summary ? "들린 내용의 핵심만 자연스러운 한국어로 아주 짧게 전해 줘.\n"
+                                   : "들린 말을 자연스러운 한국어로 짧게 번역해 줘. 원래 한국어면 none.\n")
+                        + "조각 앞뒤가 문장 중간에서 잘렸을 수 있어. 바로 앞 번역: \"" + context + "\"\n"
+                        + "앞 번역과 겹치는 내용은 빼고 이어지는 부분만. 설명, 따옴표, 기호 없이 번역문만.\n"
+                        + "말소리가 없거나 음악/잡음뿐이면 none 이라고만 답해.";
+                String t;
+                try { t = core.askModel(prompt, null, wav).trim(); }
+                catch (Exception e) { core.log("이 조각은 건너뜀: " + e.getMessage()); t = ""; }
+                results.put(seq, t);
+            });
+        }, core::log));
+        rec.start();
+        int nextOut = 0;
+        long waitSince = System.currentTimeMillis();
+        StringBuilder shown = new StringBuilder();
+        while (running) {
+            String t = results.remove(nextOut);
+            if (t == null) {
+                int made; synchronized (nextIn) { made = nextIn[0]; }
+                // 너무 오래 안 오는 조각은 건너뜀
+                if (nextOut < made && System.currentTimeMillis() - waitSince > 10000) { nextOut++; waitSince = System.currentTimeMillis(); continue; }
+                if (System.currentTimeMillis() - lastVoice[0] > 120000) { core.say("소리가 없어서 통역을 끝낼게요"); break; }
+                Thread.sleep(100);
+                continue;
+            }
+            nextOut++;
+            waitSince = System.currentTimeMillis();
+            if (t.isEmpty() || t.equalsIgnoreCase("none")) continue;
+            synchronized (prev) { prev.append(' ').append(t); }
+            shown.append(' ').append(t);
+            core.answer(shown.length() > 800 ? "…" + shown.substring(shown.length() - 800) : shown.toString().trim());
+            int backlog = results.size();
+            core.speakQueuedFast(t, Locale.KOREAN, backlog > 0 || core.isSpeaking());
+        }
+        pool.shutdownNow();
+        return shown.toString().trim();
     }
 }

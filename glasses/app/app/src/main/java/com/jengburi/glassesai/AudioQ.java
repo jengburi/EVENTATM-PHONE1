@@ -59,7 +59,7 @@ public class AudioQ {
                 chunk.write(b, 0, b.length);
                 frames++;
                 if (voice) { speech++; silent = 0; } else silent++;
-                boolean cut = (frames >= 20 && silent >= 4) || frames >= 80 || (silent >= 15);
+                boolean cut = (frames >= 15 && silent >= 3) || frames >= 45 || silent >= 10; // 0.3초 쉼 또는 최대 4.5초
                 if (cut) {
                     if (speech >= 6) sink.onChunk(wav(chunk.toByteArray()));
                     chunk.reset(); frames = 0; speech = 0; silent = 0;

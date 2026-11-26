@@ -77,6 +77,14 @@ public class AppCore {
         tts.setLanguage(loc);
         tts.speak(s, TextToSpeech.QUEUE_ADD, null, "q" + System.nanoTime());
     }
+    /** 번역이 밀릴 때는 더 빠르게 읽기 */
+    public void speakQueuedFast(String s, Locale loc, boolean fast) {
+        if (!ttsReady) return;
+        float base = prefs.getFloat("rate", 1.0f);
+        tts.setSpeechRate(fast ? Math.max(base * 1.35f, 1.4f) : base);
+        tts.setLanguage(loc);
+        tts.speak(s, TextToSpeech.QUEUE_ADD, null, "q" + System.nanoTime());
+    }
     public boolean isSpeaking() { return ttsReady && tts.isSpeaking(); }
     public void resetLanguage() { if (ttsReady) tts.setLanguage(Locale.KOREAN); }
 
