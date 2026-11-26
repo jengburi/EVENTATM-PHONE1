@@ -2,55 +2,59 @@ package com.jengburi.glassesai;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.speech.tts.TextToSpeech;
 import android.text.InputType;
 import android.view.Gravity;
-import android.view.ViewGroup;
+import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
-public class MainActivity extends Activity {
-    static final String DEFAULT_PROMPT =
-            "이 사진은 내가 쓴 안경 카메라로 방금 찍은 거야. 한국어로 짧게 답해 줘.\n"
-            + "- 메뉴판, 표지판 같은 글자가 있으면 한국어로 번역해서 읽어 줘.\n"
-            + "- 시험 문제가 있으면 정답과 짧은 풀이를 알려 줘.\n"
-            + "- 그 외에는 앞에 보이는 것을 2~3문장으로 설명해 줘.\n"
-            + "귀로 듣는 답이니 기호, 표, 마크다운 없이 말하듯이 써 줘.";
-
-    private SharedPreferences prefs;
-    private EditText keyEdit, modelEdit, promptEdit;
-    private Button goBtn;
+public class MainActivity extends Activity implements AppCore.Ui {
+    private AppCore core;
+    private EditText keyEdit, modelEdit, promptEdit, triggerEdit;
+    private Button goBtn, againBtn, serviceBtn;
+    private CheckBox voiceBox, mediaBox;
+    private RadioGroup modeGroup;
     private ImageView photo;
     private TextView answer, logView;
-    private TextToSpeech tts;
-    private GlassesBle ble;
-    private GlassesWifi wifi;
-    private volatile boolean busy;
-    private volatile byte[] lastJpeg;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        prefs = getSharedPreferences("glassesai", MODE_PRIVATE);
+        core = AppCore.get(this);
         buildUi();
-        ble = new GlassesBle(this, this::log);
-        wifi = new GlassesWifi(this, this::log);
-        tts = new TextToSpeech(this, s -> { if (s == TextToSpeech.SUCCESS) tts.setLanguage(Locale.KOREAN); });
         askPermissions();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        core.ui = this;
+        loadFields();
+        logView.setText(core.logText());
+        answer.setText(core.lastAnswer);
+        if (core.lastJpeg != null) onPhoto(core.lastJpeg);
+        onBusy(core.busy);
+        updateServiceBtn();
+    }
+
+    @Override protected void onPause() {
+        super.onPause();
+        saveFields();
+        core.ui = null;
     }
 
     private void buildUi() {
@@ -70,8 +74,18 @@ public class MainActivity extends Activity {
         goBtn.setText("📸  안경으로 찍고 설명 듣기");
         goBtn.setTextSize(20);
         goBtn.setMinHeight(dp(96));
-        goBtn.setOnClickListener(v -> start());
+        goBtn.setOnClickListener(v -> { saveFields(); core.trigger("화면 버튼"); });
         col.addView(goBtn, new LinearLayout.LayoutParams(-1, -2));
+
+        againBtn = new Button(this);
+        againBtn.setText("🔁 방금 사진으로 다시 물어보기");
+        againBtn.setOnClickListener(v -> { saveFields(); core.askAgain(); });
+        col.addView(againBtn, new LinearLayout.LayoutParams(-1, -2));
+
+        Button stopBtn = new Button(this);
+        stopBtn.setText("🔇 읽기 멈추기");
+        stopBtn.setOnClickListener(v -> core.stopSpeaking());
+        col.addView(stopBtn, new LinearLayout.LayoutParams(-1, -2));
 
         answer = new TextView(this);
         answer.setTextSize(18);
@@ -82,36 +96,62 @@ public class MainActivity extends Activity {
         photo.setAdjustViewBounds(true);
         col.addView(photo, new LinearLayout.LayoutParams(-1, -2));
 
-        col.addView(label("Gemini API 키 (aistudio.google.com 에서 무료 발급)"));
-        keyEdit = new EditText(this);
-        keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        keyEdit.setText(prefs.getString("key", ""));
-        col.addView(keyEdit);
-
-        col.addView(label("모델 이름"));
-        modelEdit = new EditText(this);
-        modelEdit.setSingleLine();
-        modelEdit.setText(prefs.getString("model", "gemini-3.8-flash"));
-        col.addView(modelEdit);
-
-        col.addView(label("AI에게 할 말 (기본 질문)"));
+        // --- 모드 ---
+        col.addView(section("모드"));
+        modeGroup = new RadioGroup(this);
+        for (int i = 0; i < AppCore.MODE_NAMES.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(1000 + i);
+            rb.setText(AppCore.MODE_NAMES[i]);
+            modeGroup.addView(rb);
+        }
+        modeGroup.setOnCheckedChangeListener((g, id) -> {
+            int m = id - 1000;
+            core.prefs.edit().putInt("mode", m).apply();
+            promptEdit.setVisibility(m == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
+        });
+        col.addView(modeGroup);
         promptEdit = new EditText(this);
-        promptEdit.setMinLines(4);
+        promptEdit.setMinLines(3);
         promptEdit.setGravity(Gravity.TOP);
-        promptEdit.setText(prefs.getString("prompt", DEFAULT_PROMPT));
+        promptEdit.setHint("AI에게 할 말을 직접 적어 주세요");
         col.addView(promptEdit);
 
-        Button againBtn = new Button(this);
-        againBtn.setText("🔁 방금 사진으로 다시 물어보기");
-        againBtn.setOnClickListener(v -> askAgain());
-        col.addView(againBtn);
+        voiceBox = new CheckBox(this);
+        voiceBox.setText("🎤 찍은 뒤 말로 질문하기 (안경 마이크)");
+        voiceBox.setOnCheckedChangeListener((v, c) -> core.prefs.edit().putBoolean("voice", c).apply());
+        col.addView(voiceBox);
 
-        Button stopBtn = new Button(this);
-        stopBtn.setText("읽기 멈추기");
-        stopBtn.setOnClickListener(v -> tts.stop());
-        col.addView(stopBtn);
+        // --- 안경 버튼 ---
+        col.addView(section("안경 버튼으로 실행"));
+        serviceBtn = new Button(this);
+        serviceBtn.setOnClickListener(v -> {
+            saveFields();
+            if (GlassesService.running) GlassesService.stop(this); else GlassesService.start(this);
+            serviceBtn.postDelayed(this::updateServiceBtn, 500);
+        });
+        col.addView(serviceBtn, new LinearLayout.LayoutParams(-1, -2));
+        mediaBox = new CheckBox(this);
+        mediaBox.setText("안경 터치(재생/일시정지 신호)로도 실행");
+        mediaBox.setOnCheckedChangeListener((v, c) -> core.prefs.edit().putBoolean("mediaKey", c).apply());
+        col.addView(mediaBox);
+        col.addView(label("실행할 안경 신호 번호 (아래 기록의 '안경 신호: XX' 값, 여러 개는 쉼표)"));
+        triggerEdit = new EditText(this);
+        triggerEdit.setSingleLine();
+        col.addView(triggerEdit);
 
-        col.addView(label("진행 기록"));
+        // --- 설정 ---
+        col.addView(section("설정"));
+        col.addView(label("Gemini API 키"));
+        keyEdit = new EditText(this);
+        keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        col.addView(keyEdit);
+        col.addView(label("모델 이름 (쉼표로 여러 개, 앞에서부터 시도)"));
+        modelEdit = new EditText(this);
+        modelEdit.setSingleLine();
+        col.addView(modelEdit);
+
+        col.addView(section("진행 기록"));
         logView = new TextView(this);
         logView.setTextSize(12);
         logView.setTextColor(Color.GRAY);
@@ -120,136 +160,72 @@ public class MainActivity extends Activity {
         setContentView(sv);
     }
 
+    private void loadFields() {
+        keyEdit.setText(core.prefs.getString("key", ""));
+        modelEdit.setText(core.models());
+        promptEdit.setText(core.prefs.getString("customPrompt", AppCore.MODE_PROMPTS[0]));
+        triggerEdit.setText(core.triggerCodes());
+        voiceBox.setChecked(core.voiceQuestion());
+        mediaBox.setChecked(core.prefs.getBoolean("mediaKey", true));
+        modeGroup.check(1000 + core.mode());
+        promptEdit.setVisibility(core.mode() == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
+    }
+
+    private void saveFields() {
+        core.prefs.edit()
+                .putString("key", keyEdit.getText().toString().trim())
+                .putString("model", modelEdit.getText().toString().trim())
+                .putString("customPrompt", promptEdit.getText().toString().trim())
+                .putString("triggers", triggerEdit.getText().toString().trim())
+                .apply();
+    }
+
+    private void updateServiceBtn() {
+        serviceBtn.setText(GlassesService.running ? "🟢 안경 버튼 대기 중 (누르면 끄기)" : "⚪ 안경 버튼 대기 켜기");
+    }
+
+    private TextView section(String s) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(17);
+        t.setPadding(0, dp(22), 0, dp(4));
+        return t;
+    }
+
     private TextView label(String s) {
         TextView t = new TextView(this);
         t.setText(s);
-        t.setPadding(0, dp(14), 0, 0);
+        t.setPadding(0, dp(10), 0, 0);
         return t;
     }
 
     private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
-    private void log(String s) {
-        runOnUiThread(() -> logView.setText(s + "\n" + logView.getText()));
-    }
-
     private void askPermissions() {
         List<String> need = new ArrayList<>();
         need.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        need.add(Manifest.permission.RECORD_AUDIO);
         if (Build.VERSION.SDK_INT >= 31) {
             need.add(Manifest.permission.BLUETOOTH_CONNECT);
             need.add(Manifest.permission.BLUETOOTH_SCAN);
         }
-        if (Build.VERSION.SDK_INT >= 33) need.add(Manifest.permission.NEARBY_WIFI_DEVICES);
+        if (Build.VERSION.SDK_INT >= 33) {
+            need.add(Manifest.permission.NEARBY_WIFI_DEVICES);
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
         List<String> missing = new ArrayList<>();
         for (String p : need) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) missing.add(p);
         if (!missing.isEmpty()) requestPermissions(missing.toArray(new String[0]), 1);
     }
 
-    private void say(String s) {
-        runOnUiThread(() -> tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "a"));
+    // ---------- AppCore.Ui ----------
+    @Override public void onLog(String s) { runOnUiThread(() -> logView.setText(core.logText())); }
+    @Override public void onAnswer(String s) { runOnUiThread(() -> answer.setText(s)); }
+    @Override public void onPhoto(byte[] jpeg) {
+        Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+        runOnUiThread(() -> photo.setImageBitmap(bmp));
     }
-
-    private void start() {
-        if (busy) return;
-        String key = keyEdit.getText().toString().trim();
-        String model = modelEdit.getText().toString().trim();
-        String prompt = promptEdit.getText().toString().trim();
-        prefs.edit().putString("key", key).putString("model", model).putString("prompt", prompt).apply();
-        if (key.isEmpty()) { answer.setText("먼저 아래에 Gemini API 키를 넣어 주세요."); return; }
-        busy = true;
-        goBtn.setEnabled(false);
-        answer.setText("진행 중…");
-        new Thread(() -> run(key, model, prompt)).start();
-    }
-
-    private void run(String key, String model, String prompt) {
-        byte[] jpeg = null;
-        try {
-            ble.connect();
-            say("찍을게요");
-            ble.takePhoto();
-            Thread.sleep(1500);
-            if (!locationOn()) throw new Exception("휴대폰 위치(GPS)를 켜 주세요. 꺼져 있으면 안경 와이파이를 못 찾아요");
-            String ssid = ble.wifiOn();
-            try {
-                log("안경 와이파이가 켜질 때까지 5초 기다리는 중…");
-                Thread.sleep(5000);
-                try {
-                    wifi.connect(ssid);
-                } catch (Exception first) {
-                    log("1차 연결 실패: " + first.getMessage() + " → 다시 시도");
-                    wifi.disconnect();
-                    ssid = ble.wifiOn();
-                    Thread.sleep(6000);
-                    wifi.connect(ssid);
-                }
-                String name = wifi.latestPhoto();
-                if (name == null) throw new Exception("안경에서 사진을 찾지 못했어요");
-                jpeg = wifi.download(name);
-            } finally {
-                wifi.disconnect();
-                ble.transferEnd();
-            }
-            lastJpeg = jpeg;
-            Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
-            runOnUiThread(() -> photo.setImageBitmap(bmp));
-
-            log("인터넷 연결 기다리는 중…");
-            if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
-            say("분석 중이에요");
-            log("Gemini에게 물어보는 중…");
-            String a = Gemini.askWithRetry(key, model, prompt, jpeg, this::log);
-            runOnUiThread(() -> answer.setText(a));
-            log("답변 받음");
-            say(a);
-        } catch (Exception e) {
-            String m = e.getMessage() == null ? e.toString() : e.getMessage();
-            log("오류: " + m);
-            runOnUiThread(() -> answer.setText("오류: " + m));
-            say("오류가 났어요. " + m);
-        } finally {
-            busy = false;
-            runOnUiThread(() -> goBtn.setEnabled(true));
-        }
-    }
-
-    private void askAgain() {
-        if (busy) return;
-        byte[] jpeg = lastJpeg;
-        if (jpeg == null) { answer.setText("아직 찍은 사진이 없어요. 위 버튼으로 먼저 찍어 주세요."); return; }
-        String key = keyEdit.getText().toString().trim();
-        String model = modelEdit.getText().toString().trim();
-        String prompt = promptEdit.getText().toString().trim();
-        prefs.edit().putString("key", key).putString("model", model).putString("prompt", prompt).apply();
-        busy = true;
-        goBtn.setEnabled(false);
-        answer.setText("다시 물어보는 중…");
-        new Thread(() -> {
-            try {
-                String a = Gemini.askWithRetry(key, model, prompt, jpeg, this::log);
-                runOnUiThread(() -> answer.setText(a));
-                say(a);
-            } catch (Exception e) {
-                String m = String.valueOf(e.getMessage());
-                runOnUiThread(() -> answer.setText("오류: " + m));
-                say("오류가 났어요");
-            } finally {
-                busy = false;
-                runOnUiThread(() -> goBtn.setEnabled(true));
-            }
-        }).start();
-    }
-
-    private boolean locationOn() {
-        android.location.LocationManager lm = (android.location.LocationManager) getSystemService(LOCATION_SERVICE);
-        return lm != null && lm.isLocationEnabled();
-    }
-
-    @Override protected void onDestroy() {
-        super.onDestroy();
-        ble.close();
-        wifi.disconnect();
-        if (tts != null) tts.shutdown();
+    @Override public void onBusy(boolean b) {
+        runOnUiThread(() -> { goBtn.setEnabled(!b); againBtn.setEnabled(!b); });
     }
 }

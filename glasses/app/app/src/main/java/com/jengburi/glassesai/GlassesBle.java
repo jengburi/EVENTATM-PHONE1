@@ -38,6 +38,9 @@ public class GlassesBle {
     public static final int CMD_TRANSFER_END = 0x44;  // DATA 0x30 0x01 = 닫기(파일 유지)
 
     public interface Log { void log(String s); }
+    /** 안경에서 오는 모든 알림 패킷을 받는 리스너 (버튼 감지용). */
+    public interface PacketListener { void onPacket(byte[] p); }
+    public volatile PacketListener listener;
 
     private final Context ctx;
     private final Log log;
@@ -71,7 +74,7 @@ public class GlassesBle {
     public boolean isConnected() { return gatt != null && cmdChar != null; }
 
     /** 페어링된 기기 중 이름이 S1Pro 로 시작하는 안경에 연결. */
-    public void connect() throws Exception {
+    public synchronized void connect() throws Exception {
         if (isConnected()) return;
         BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
         BluetoothAdapter ad = bm.getAdapter();
@@ -83,6 +86,7 @@ public class GlassesBle {
         }
         if (dev == null) throw new Exception("페어링된 S1Pro 안경을 찾지 못했어요");
         log.log("안경 연결 중: " + dev.getName());
+        if (gatt != null) { try { gatt.close(); } catch (Exception ignored) { } gatt = null; }
         gattEvents.clear();
         gatt = dev.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE);
         waitEvent("connected", 15);
@@ -183,14 +187,22 @@ public class GlassesBle {
         @Override public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor d, int status) { gattEvents.offer("desc"); }
         @Override public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) { gattEvents.offer("write"); }
         @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c, byte[] value) {
-            if (value != null) packets.offer(value.clone());
+            if (value != null) deliver(value.clone());
         }
         @SuppressWarnings("deprecation")
         @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {
             // Android 12 이하에서 호출됨 (13 이상은 위 메서드)
             if (android.os.Build.VERSION.SDK_INT >= 33) return;
             byte[] v = c.getValue();
-            if (v != null) packets.offer(v.clone());
+            if (v != null) deliver(v.clone());
         }
     };
+
+    private void deliver(byte[] v) {
+        // 음성 데이터(0x46)는 양이 많아서 큐에는 넣지 않음
+        boolean audio = v.length > 4 && (v[4] & 0xFF) == 0x46;
+        if (!audio) packets.offer(v);
+        PacketListener l = listener;
+        if (l != null) { try { l.onPacket(v); } catch (Exception ignored) { } }
+    }
 }

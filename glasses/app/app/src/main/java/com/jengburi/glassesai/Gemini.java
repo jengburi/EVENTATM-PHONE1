@@ -14,6 +14,9 @@ import java.net.URLEncoder;
 
 /** Google Gemini API 로 사진 + 질문을 보내고 답을 받는다. */
 public class Gemini {
+    /** 자동으로 찾아 성공한 모델 이름 (없으면 null). */
+    public static volatile String lastFallbackModel;
+
     /** 503/429(혼잡)이면 잠시 쉬고 재시도, 모델 칸에 쉼표로 여러 개 적으면 차례로 시도. */
     public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, GlassesBle.Log log) throws Exception {
         Exception last = null;
@@ -44,7 +47,8 @@ public class Gemini {
                 try {
                     log.log(m + " 로 시도");
                     String a = ask(apiKey, m, prompt, jpeg);
-                    log.log("성공한 모델: " + m + " (모델 칸에 적어 두면 다음부터 바로 사용)");
+                    log.log("성공한 모델: " + m + " (다음부터 이 모델을 먼저 사용)");
+                    lastFallbackModel = m;
                     return a;
                 } catch (Exception e) { last = e; log.log(m + " 실패: " + e.getMessage()); }
             }
