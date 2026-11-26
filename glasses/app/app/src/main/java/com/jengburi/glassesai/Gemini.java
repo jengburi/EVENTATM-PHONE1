@@ -33,7 +33,47 @@ public class Gemini {
                 }
             }
         }
+        // 적어 둔 모델이 모두 혼잡/없음이면, 내 키로 쓸 수 있는 flash 계열 모델을 찾아 차례로 시도
+        try {
+            java.util.List<String> avail = listFlashModels(apiKey);
+            log.log("쓸 수 있는 모델: " + avail);
+            int tried = 0;
+            for (String m : avail) {
+                if (models.contains(m)) continue;
+                if (++tried > 5) break;
+                try {
+                    log.log(m + " 로 시도");
+                    String a = ask(apiKey, m, prompt, jpeg);
+                    log.log("성공한 모델: " + m + " (모델 칸에 적어 두면 다음부터 바로 사용)");
+                    return a;
+                } catch (Exception e) { last = e; log.log(m + " 실패: " + e.getMessage()); }
+            }
+        } catch (Exception e) { log.log("모델 목록 조회 실패: " + e.getMessage()); }
         throw last != null ? last : new Exception("모델 이름이 비어 있어요");
+    }
+
+    /** generateContent 를 지원하는 flash 계열 모델 이름 목록 (최신 우선). */
+    public static java.util.List<String> listFlashModels(String apiKey) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(
+                "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").openConnection();
+        c.setRequestProperty("x-goog-api-key", apiKey);
+        c.setConnectTimeout(15000); c.setReadTimeout(20000);
+        InputStream in = c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream();
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192]; int n;
+        while (in != null && (n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        JSONArray arr = new JSONObject(bo.toString("UTF-8")).getJSONArray("models");
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject m = arr.getJSONObject(i);
+            String name = m.optString("name").replace("models/", "");
+            String methods = String.valueOf(m.optJSONArray("supportedGenerationMethods"));
+            if (name.contains("flash") && methods.contains("generateContent")
+                    && !name.contains("tts") && !name.contains("image") && !name.contains("audio")
+                    && !name.contains("live") && !name.contains("embedding")) out.add(name);
+        }
+        java.util.Collections.sort(out, java.util.Collections.reverseOrder());
+        return out;
     }
 
     public static String ask(String apiKey, String model, String prompt, byte[] jpeg) throws Exception {
