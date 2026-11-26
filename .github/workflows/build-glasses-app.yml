@@ -7,6 +7,9 @@ on:
       - '.github/workflows/build-glasses-app.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,3 +33,13 @@ jobs:
         with:
           name: glasses-ai-apk
           path: glasses/app/glasses-ai.apk
+      - name: Publish APK to apk-builds branch
+        run: |
+          mkdir -p /tmp/out && cp glasses-ai.apk /tmp/out/
+          cd /tmp/out
+          git init -q -b apk-builds
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add glasses-ai.apk
+          git commit -q -m "glasses-ai.apk from ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
