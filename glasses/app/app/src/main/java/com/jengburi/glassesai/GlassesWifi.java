@@ -47,8 +47,9 @@ public class GlassesWifi {
             @Override public void onUnavailable() { err[0] = "안경 와이파이 연결을 거절했거나 찾지 못했어요"; ok.countDown(); }
         };
         log.log("안경 와이파이 연결 중… (처음엔 '연결 허용' 창이 떠요)");
-        cm.requestNetwork(req, cb, 60000);
-        if (!ok.await(65, TimeUnit.SECONDS) || network == null)
+        log.log("연결 창이 뜨면 목록에 " + ssid + " 가 나타날 때까지 기다렸다가 '연결'을 눌러 주세요");
+        cm.requestNetwork(req, cb, 90000);
+        if (!ok.await(95, TimeUnit.SECONDS) || network == null)
             throw new Exception(err[0] != null ? err[0] : "안경 와이파이 연결 시간 초과");
         log.log("안경 와이파이 연결 완료");
     }

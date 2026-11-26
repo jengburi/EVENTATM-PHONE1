@@ -164,9 +164,20 @@ public class MainActivity extends Activity {
             say("찍을게요");
             ble.takePhoto();
             Thread.sleep(1500);
+            if (!locationOn()) throw new Exception("휴대폰 위치(GPS)를 켜 주세요. 꺼져 있으면 안경 와이파이를 못 찾아요");
             String ssid = ble.wifiOn();
             try {
-                wifi.connect(ssid);
+                log("안경 와이파이가 켜질 때까지 5초 기다리는 중…");
+                Thread.sleep(5000);
+                try {
+                    wifi.connect(ssid);
+                } catch (Exception first) {
+                    log("1차 연결 실패: " + first.getMessage() + " → 다시 시도");
+                    wifi.disconnect();
+                    ssid = ble.wifiOn();
+                    Thread.sleep(6000);
+                    wifi.connect(ssid);
+                }
                 String name = wifi.latestPhoto();
                 if (name == null) throw new Exception("안경에서 사진을 찾지 못했어요");
                 jpeg = wifi.download(name);
@@ -194,6 +205,11 @@ public class MainActivity extends Activity {
             busy = false;
             runOnUiThread(() -> goBtn.setEnabled(true));
         }
+    }
+
+    private boolean locationOn() {
+        android.location.LocationManager lm = (android.location.LocationManager) getSystemService(LOCATION_SERVICE);
+        return lm != null && lm.isLocationEnabled();
     }
 
     @Override protected void onDestroy() {
