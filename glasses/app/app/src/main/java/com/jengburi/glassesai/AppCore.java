@@ -34,7 +34,7 @@ public class AppCore {
             ""
     };
     /** 버튼에 붙일 수 있는 특수 동작 */
-    public static final int ACT_REPLAY = -2, ACT_VOICE_ONLY = -3, ACT_CURRENT = -1;
+    public static final int ACT_REPLAY = -2, ACT_VOICE_ONLY = -3, ACT_CURRENT = -1, ACT_SMART = -4, ACT_PHOTO = -5;
 
     private static AppCore inst;
     public static synchronized AppCore get(Context c) {
@@ -138,6 +138,8 @@ public class AppCore {
         s = s.trim();
         if (s.isEmpty()) return ACT_CURRENT;
         if (s.contains("다시")) return ACT_REPLAY;
+        if (s.contains("비서") || s.contains("그냥") || s.contains("물어")) return ACT_SMART;
+        if (s.contains("사진") || s.contains("찍")) return ACT_PHOTO;
         if (s.contains("말로")) return ACT_VOICE_ONLY;
         for (int i = 0; i < MODE_NAMES.length; i++) if (MODE_NAMES[i].replace(" ", "").equals(s.replace(" ", ""))) return i;
         try { int n = Integer.parseInt(s); if (n >= 0 && n < MODE_NAMES.length) return n; } catch (NumberFormatException ignored) { }
@@ -167,8 +169,9 @@ public class AppCore {
     public void action(String source, int act) {
         if (speaking && act != ACT_REPLAY) { stopSpeaking(); log("읽기 멈춤"); return; }
         if (act == ACT_REPLAY) { replay(); return; }
-        if (act == ACT_VOICE_ONLY) { voiceOnly(source); return; }
-        trigger(source, act);
+        if (act == ACT_VOICE_ONLY || act == ACT_SMART) { smartAsk(source); return; }
+        if (act == ACT_CURRENT && prefs.getBoolean("buttonSmart", true)) { smartAsk(source); return; }
+        trigger(source, act == ACT_PHOTO ? ACT_CURRENT : act);
     }
 
     public void trigger(String source) { trigger(source, ACT_CURRENT); }
@@ -192,21 +195,68 @@ public class AppCore {
         say(a);
     }
 
-    /** 사진 없이 말로만 묻기. */
-    public synchronized void voiceOnly(String source) {
-        if (busy) return;
+    public void voiceOnly(String source) { smartAsk(source); }
+
+    static final String SMART_PROMPT = "너는 사용자가 쓰고 있는 AI 안경 속 비서야. 친구처럼 짧고 자연스럽게 한국어로 답해 줘.\n"
+            + "사용자가 음성으로 질문했어(첨부된 오디오).\n"
+            + "만약 답하려면 사용자 눈앞을 봐야 하는 질문이면(예: 이거 뭐야, 저거 뭐야, 앞에 뭐 있어, 이거 번역해 줘, 이거 읽어 줘, 이거 얼마야, 이 문제 풀어 줘) "
+            + "다른 말 없이 [사진] 이라고만 답해.\n"
+            + "사용자가 '없어', '그만', '끝', '됐어' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.\n"
+            + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
+
+    /** 그냥 물어보기: 말로 묻고, 앞을 봐야 하는 질문이면 자동으로 찍어서 대답. 이어서 대화 가능. */
+    public synchronized void smartAsk(String source) {
+        long now = System.currentTimeMillis();
+        if (busy || now - lastTrigger < 1500) return;
+        lastTrigger = now;
         if (key().isEmpty()) { say("먼저 앱에 제미나이 API 키를 넣어 주세요"); return; }
         setBusy(true);
-        log("▶ 말로만 묻기 (" + source + ")");
+        log("▶ 그냥 물어보기 (" + source + ")");
         new Thread(() -> {
             try {
-                sayAndWait("말씀하세요", 5);
-                Question q = listenQuestion(7);
-                if (q.empty()) { say("못 들었어요"); return; }
-                conversation(null, "다음 질문에 한국어로 짧게 답해 줘." + COMMON_TAIL, "말로만", q);
+                StringBuilder past = new StringBuilder();
+                byte[] photoForChat = null;
+                for (int turn = 0; turn < 8; turn++) {
+                    byte[] wav = AudioQ.record(ctx, glassesMic(), turn == 0 ? 7 : 6, 15, this::log);
+                    if (wav == null) { if (turn == 0) say("못 들었어요"); return; }
+                    answer("생각 중…");
+                    String prompt = SMART_PROMPT + COMMON_TAIL;
+                    if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
+                    if (photoForChat != null) prompt += "\n\n(앞서 찍은 사진이 함께 첨부돼 있어. 사진 관련 질문이면 이 사진을 보고 답해.)";
+                    byte[] newPhoto = null;
+                    String a = askModel(prompt, photoForChat, wav);
+                    if (a.contains("[끝]")) { say("알겠어요"); return; }
+                    if (a.contains("[사진]")) {
+                        say("잠깐만요, 볼게요");
+                        byte[] jpeg = capturePhoto();
+                        photoForChat = jpeg;
+                        newPhoto = jpeg;
+                        log("인터넷 연결 기다리는 중…");
+                        if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
+                        String p2 = prompt(mode()) + "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 사진을 보고 그 질문에 먼저 답해 줘. 질문을 다시 적지 마.";
+                        if (past.length() > 0) p2 += "\n\n지금까지 대화:\n" + past;
+                        a = askModel(p2, jpeg, wav).replace("[사진]", "").trim();
+                    }
+                    answer(a);
+                    History.save(ctx, newPhoto, "그냥 물어보기", "(음성 질문)", a, toGallery());
+                    Ui u = ui; if (u != null) u.onHistoryChanged();
+                    past.append("사용자: (음성 질문)\nAI: ").append(a).append("\n");
+                    boolean finished = sayAndWait(a, 180);
+                    if (!finished || !prefs.getBoolean("smartFollow", true)) return;
+                    log("더 물어보실 게 있으면 삐 소리 뒤에 말씀하세요");
+                }
             } catch (Exception e) { fail(e); }
             finally { setBusy(false); }
         }).start();
+    }
+
+    private String askModel(String prompt, byte[] jpeg, byte[] wav) throws Exception {
+        log("Gemini에게 물어보는 중…");
+        Gemini.lastFallbackModel = null;
+        String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, wav, this::log);
+        String fb = Gemini.lastFallbackModel;
+        if (fb != null && !models().contains(fb)) prefs.edit().putString("model", fb + ", " + models()).apply();
+        return a;
     }
 
     public void askAgain() {
@@ -235,10 +285,9 @@ public class AppCore {
         return lm != null && lm.isLocationEnabled();
     }
 
-    private void runFlow(int m) {
-        try {
-            answer("진행 중…");
-            ble.connect();
+    /** 안경으로 찍고 사진을 받아 온다 (와이파이 전환 포함). */
+    private byte[] capturePhoto() throws Exception {
+        ble.connect();
             say("찍을게요");
             ble.takePhoto();
             Thread.sleep(1500);
@@ -266,6 +315,13 @@ public class AppCore {
             }
             lastJpeg = jpeg;
             Ui u = ui; if (u != null) u.onPhoto(jpeg);
+            return jpeg;
+    }
+
+    private void runFlow(int m) {
+        try {
+            answer("진행 중…");
+            byte[] jpeg = capturePhoto();
             log("인터넷 연결 기다리는 중…");
             if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
             askAndSpeak(jpeg, m);

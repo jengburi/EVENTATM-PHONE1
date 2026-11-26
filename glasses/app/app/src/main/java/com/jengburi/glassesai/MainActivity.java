@@ -31,7 +31,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private AppCore core;
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
-    private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox;
+    private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox, smartBox, smartFollowBox;
     private RadioGroup modeGroup, rateGroup;
     private ImageView photo;
     private TextView answer, logView;
@@ -76,7 +76,10 @@ public class MainActivity extends Activity implements AppCore.Ui {
         title.setTextSize(22);
         col.addView(title);
 
-        goBtn = bigButton(col, "📸  안경으로 찍고 설명 듣기", 96);
+        voiceBtn = bigButton(col, "🎤  그냥 물어보기\n(앞을 봐야 하면 알아서 찍어요)", 96);
+        voiceBtn.setOnClickListener(v -> { saveFields(); core.smartAsk("화면 버튼"); });
+
+        goBtn = bigButton(col, "📸  안경으로 찍고 설명 듣기", 64);
         goBtn.setOnClickListener(v -> { saveFields(); core.trigger("화면 버튼"); });
 
         LinearLayout row = new LinearLayout(this);
@@ -88,8 +91,6 @@ public class MainActivity extends Activity implements AppCore.Ui {
         Button stopBtn = rowButton(row, "🔇 멈추기");
         stopBtn.setOnClickListener(v -> core.stopSpeaking());
 
-        voiceBtn = bigButton(col, "🎤 사진 없이 말로만 물어보기", 56);
-        voiceBtn.setOnClickListener(v -> { saveFields(); core.voiceOnly("화면 버튼"); });
 
         answer = new TextView(this);
         answer.setTextSize(18);
@@ -124,8 +125,10 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
         // --- 대화 ---
         col.addView(section("대화"));
-        voiceBox = check(col, "🎤 찍은 뒤 말로 질문하기 (안경 마이크)", "voice", false);
-        followBox = check(col, "💬 연속 대화 (대답 뒤 \"더 궁금한 거 있으세요?\" → 이어서 질문, \"없어\"라고 하면 끝)", "followUp", false);
+        smartBox = check(col, "👓 안경 버튼 = 그냥 물어보기 (끄면 = 바로 찍고 설명)", "buttonSmart", true);
+        smartFollowBox = check(col, "🔁 그냥 물어보기 뒤에 이어서 계속 대화 (말 안 하면 끝)", "smartFollow", true);
+        voiceBox = check(col, "🎤 '찍고 설명' 때도 찍은 뒤 말로 질문하기", "voice", false);
+        followBox = check(col, "💬 '찍고 설명' 뒤에도 이어서 대화", "followUp", false);
         geminiEarBox = check(col, "👂 Gemini가 목소리를 직접 듣기 (추천, 웅얼거려도 잘 알아들음)", "geminiListen", true);
         glassesMicBox = check(col, "👓 안경 마이크 사용 (끄면 휴대폰 마이크)", "glassesMic", true);
         galleryBox = check(col, "🖼 찍은 사진을 휴대폰 갤러리에도 저장 (Pictures/GlassesAI)", "gallery", true);
@@ -150,8 +153,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
             serviceBtn.postDelayed(this::updateServiceBtn, 500);
         });
         col.addView(serviceBtn, new LinearLayout.LayoutParams(-1, -2));
-        TextView help = label("버튼에 붙일 수 있는 동작: 자동 / 번역 / 문제 풀이 / 설명 / 쟁부리우드 제품 / 직접 입력 / 다시듣기 / 말로만\n"
-                + "(비워 두면 위에서 고른 모드, AI가 읽는 중에 누르면 읽기 멈춤)");
+        TextView help = label("버튼에 붙일 수 있는 동작: 그냥물어보기 / 사진 / 자동 / 번역 / 문제 풀이 / 설명 / 쟁부리우드 제품 / 직접 입력 / 다시듣기\n"
+                + "(비워 두면 위 '안경 버튼' 설정대로, AI가 읽는 중에 누르면 읽기 멈춤)");
         help.setTextColor(Color.GRAY);
         col.addView(help);
         col.addView(label("안경 블루투스 신호 → 동작  (예: 97  또는  97:번역, 51:다시듣기)"));
@@ -238,7 +241,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         nextEdit.setText(core.prefs.getString("actNext", "번역"));
         prevEdit.setText(core.prefs.getString("actPrev", "다시듣기"));
         loadCheck(voiceBox); loadCheck(followBox); loadCheck(galleryBox); loadCheck(mediaBox);
-        loadCheck(geminiEarBox); loadCheck(glassesMicBox);
+        loadCheck(geminiEarBox); loadCheck(glassesMicBox); loadCheck(smartBox); loadCheck(smartFollowBox);
         modeGroup.check(1000 + core.mode());
         promptEdit.setVisibility(core.mode() == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
         float r = core.prefs.getFloat("rate", 1.0f);
