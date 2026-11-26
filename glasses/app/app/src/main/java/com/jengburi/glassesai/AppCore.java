@@ -66,6 +66,15 @@ public class AppCore {
         });
         ble.listener = this::onPacket;
         interp = new Interpreter(this);
+        ble.preferredAddress = prefs.getString("glassesAddr", "");
+    }
+
+    /** 사용할 안경 바꾸기 (빈 문자열 = 자동) */
+    public void selectGlasses(String addr, String name) {
+        prefs.edit().putString("glassesAddr", addr).putString("glassesName", name).apply();
+        ble.preferredAddress = addr;
+        ble.close();
+        log("사용할 안경: " + (addr.isEmpty() ? "자동 (S1Pro / M88)" : name));
     }
 
     public final Interpreter interp;

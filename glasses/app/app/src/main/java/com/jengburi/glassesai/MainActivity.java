@@ -32,6 +32,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
     private Button convoBtn, listenBtn;
+    private RadioGroup glassesGroup;
+    private final java.util.List<String[]> glassesList = new java.util.ArrayList<>();
     private RadioGroup langGroup;
     private CheckBox speakerBox, summaryBox, interpMicBox, liveBox;
     private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox, smartBox, smartFollowBox;
@@ -58,6 +60,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         onBusy(core.busy);
         updateServiceBtn();
         refreshHistory();
+        refreshGlasses();
     }
 
     @Override protected void onPause() {
@@ -174,6 +177,18 @@ public class MainActivity extends Activity implements AppCore.Ui {
         }
         rateGroup.setOnCheckedChangeListener((g, id) -> core.prefs.edit().putFloat("rate", RATES[id - 2000]).apply());
         col.addView(rateGroup);
+
+        // --- 안경 고르기 ---
+        col.addView(section("👓 안경 고르기 (S1Pro, M88 등)"));
+        TextView gh = label("휴대폰과 블루투스로 페어링된 기기 목록이에요. 쓰실 안경을 고르세요.");
+        gh.setTextColor(Color.GRAY);
+        col.addView(gh);
+        glassesGroup = new RadioGroup(this);
+        col.addView(glassesGroup);
+        Button refreshBtn = new Button(this);
+        refreshBtn.setText("목록 새로고침");
+        refreshBtn.setOnClickListener(v -> refreshGlasses());
+        col.addView(refreshBtn);
 
         // --- 안경 버튼 ---
         col.addView(section("안경 버튼으로 실행"));
@@ -298,6 +313,27 @@ public class MainActivity extends Activity implements AppCore.Ui {
                 .putString("actNext", nextEdit.getText().toString().trim())
                 .putString("actPrev", prevEdit.getText().toString().trim())
                 .apply();
+    }
+
+    private void refreshGlasses() {
+        glassesGroup.setOnCheckedChangeListener(null);
+        glassesGroup.removeAllViews();
+        glassesList.clear();
+        glassesList.add(new String[]{"자동 (S1Pro / M88 이름으로 찾기)", ""});
+        glassesList.addAll(core.ble.bondedList());
+        String cur = core.prefs.getString("glassesAddr", "");
+        for (int i = 0; i < glassesList.size(); i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(4000 + i);
+            String[] g = glassesList.get(i);
+            rb.setText(g[1].isEmpty() ? g[0] : g[0] + "  (" + g[1] + ")");
+            glassesGroup.addView(rb);
+            if (g[1].equalsIgnoreCase(cur)) glassesGroup.check(4000 + i);
+        }
+        glassesGroup.setOnCheckedChangeListener((gr, id) -> {
+            String[] g = glassesList.get(id - 4000);
+            core.selectGlasses(g[1], g[0]);
+        });
     }
 
     private void updateServiceBtn() {

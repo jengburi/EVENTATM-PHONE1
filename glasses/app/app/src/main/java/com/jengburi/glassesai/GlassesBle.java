@@ -73,18 +73,42 @@ public class GlassesBle {
 
     public boolean isConnected() { return gatt != null && cmdChar != null; }
 
-    /** 페어링된 기기 중 이름이 S1Pro 로 시작하는 안경에 연결. */
+    /** 같은 방식(DANHAI)으로 알려진 안경 이름 앞부분 */
+    static final String[] KNOWN = {"S1PRO", "M88"};
+
+    /** 앱에서 고른 안경 주소 (비어 있으면 이름으로 자동 선택) */
+    public volatile String preferredAddress = "";
+
+    /** 페어링된 블루투스 기기 목록 (이름, 주소) */
+    public java.util.List<String[]> bondedList() {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        try {
+            BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+            for (BluetoothDevice d : bm.getAdapter().getBondedDevices())
+                out.add(new String[]{d.getName() == null ? "(이름 없음)" : d.getName(), d.getAddress()});
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    /** 고른 안경 → 없으면 S1Pro/M88 이름으로 자동 선택. */
     public synchronized void connect() throws Exception {
         if (isConnected()) return;
         BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
         BluetoothAdapter ad = bm.getAdapter();
         if (ad == null || !ad.isEnabled()) throw new Exception("블루투스가 꺼져 있어요");
         BluetoothDevice dev = null;
+        String pref = preferredAddress;
         for (BluetoothDevice d : ad.getBondedDevices()) {
-            String n = d.getName();
-            if (n != null && n.toUpperCase().startsWith("S1PRO")) { dev = d; break; }
+            if (!pref.isEmpty() && pref.equalsIgnoreCase(d.getAddress())) { dev = d; break; }
         }
-        if (dev == null) throw new Exception("페어링된 S1Pro 안경을 찾지 못했어요");
+        if (dev == null) {
+            for (BluetoothDevice d : ad.getBondedDevices()) {
+                String n = d.getName() == null ? "" : d.getName().toUpperCase().replace(" ", "");
+                for (String k : KNOWN) if (n.startsWith(k) || n.contains(k)) { dev = d; break; }
+                if (dev != null) break;
+            }
+        }
+        if (dev == null) throw new Exception("연결할 안경을 찾지 못했어요. 앱의 '안경 고르기'에서 안경을 선택해 주세요");
         log.log("안경 연결 중: " + dev.getName());
         if (gatt != null) { try { gatt.close(); } catch (Exception ignored) { } gatt = null; }
         gattEvents.clear();
