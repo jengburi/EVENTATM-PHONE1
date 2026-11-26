@@ -159,6 +159,10 @@ public class MainActivity extends Activity implements AppCore.Ui {
         col.addView(help);
         col.addView(label("안경 블루투스 신호 → 동작  (예: 97  또는  97:번역, 51:다시듣기)"));
         triggerEdit = edit(col);
+        Button batBtn = new Button(this);
+        batBtn.setText("🔋 화면 꺼져도 동작하게 (배터리 제한 해제)");
+        batBtn.setOnClickListener(v -> askBatteryExemption());
+        col.addView(batBtn, new LinearLayout.LayoutParams(-1, -2));
         mediaBox = check(col, "안경 터치(재생 신호)도 사용", "mediaKey", true);
         col.addView(label("재생/일시정지 신호 → 동작 (비우면 현재 모드)"));
         playEdit = edit(col);
@@ -306,6 +310,21 @@ public class MainActivity extends Activity implements AppCore.Ui {
     }
 
     private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+
+    private void askBatteryExemption() {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                answer.setText("이미 배터리 제한이 해제돼 있어요. 삼성 휴대폰은 설정 → 배터리 → 백그라운드 사용 제한 → '절전 예외 앱'에도 '안경 AI'를 추가해 주세요.");
+                return;
+            }
+            android.content.Intent i = new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(android.net.Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Exception e) {
+            startActivity(new android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        }
+    }
 
     private void askPermissions() {
         List<String> need = new ArrayList<>();

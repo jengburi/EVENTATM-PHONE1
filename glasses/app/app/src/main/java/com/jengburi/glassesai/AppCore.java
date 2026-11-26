@@ -271,7 +271,20 @@ public class AppCore {
         }).start();
     }
 
-    private void setBusy(boolean b) { busy = b; Ui u = ui; if (u != null) u.onBusy(b); }
+    private android.os.PowerManager.WakeLock wakeLock;
+    private void setBusy(boolean b) {
+        busy = b;
+        try {
+            if (b) {
+                if (wakeLock == null) {
+                    android.os.PowerManager pm = (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+                    wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "glassesai:work");
+                }
+                if (!wakeLock.isHeld()) wakeLock.acquire(5 * 60 * 1000L);
+            } else if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception ignored) { }
+        Ui u = ui; if (u != null) u.onBusy(b);
+    }
     private void answer(String a) { lastAnswer = a; Ui u = ui; if (u != null) u.onAnswer(a); }
     private void fail(Exception e) {
         String m = e.getMessage() == null ? e.toString() : e.getMessage();

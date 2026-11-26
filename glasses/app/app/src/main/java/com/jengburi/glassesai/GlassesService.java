@@ -44,7 +44,14 @@ public class GlassesService extends Service {
                 .setContentText("안경 버튼을 누르면 찍고 설명해 줘요")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setContentIntent(pi).setOngoing(true).build();
-        if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        if (Build.VERSION.SDK_INT >= 30) {
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+            startForeground(1, n, type);
+        } else if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         else startForeground(1, n);
         running = true;
         AppCore core = AppCore.get(this);
