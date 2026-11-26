@@ -17,6 +17,62 @@ import java.nio.ByteOrder;
 /** 말소리를 녹음해서 WAV 로 돌려준다 (말이 끝나면 자동으로 멈춤). Gemini 가 직접 듣게 할 때 사용. */
 public class AudioQ {
     static final int RATE = 16000;
+    /** true 로 바꾸면 진행 중인 녹음을 바로 멈춤 */
+    public static volatile boolean cancel;
+
+    public interface ChunkSink { void onChunk(byte[] wav); }
+    public interface Running { boolean get(); }
+
+    /**
+     * 끊지 않고 계속 녹음하면서, 짧게 쉬는 곳(0.4초)이나 최대 8초마다 잘라서 sink 로 넘긴다.
+     * running.get() 이 false 가 되면 끝.
+     */
+    @SuppressLint("MissingPermission")
+    public static void stream(Context ctx, boolean glassesMic, Running running, ChunkSink sink, GlassesBle.Log log) {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        boolean sco = glassesMic && useGlassesMic(am, log);
+        AudioRecord rec = null;
+        try {
+            int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            rec = new AudioRecord(sco ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.MIC,
+                    RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, RATE * 2));
+            rec.startRecording();
+            log.log((sco ? "안경" : "휴대폰") + " 마이크로 계속 듣는 중…");
+            int frame = RATE / 10;
+            short[] buf = new short[frame];
+            ByteArrayOutputStream chunk = new ByteArrayOutputStream();
+            double noise = -1;
+            int frames = 0, speech = 0, silent = 0, total = 0;
+            while (running.get()) {
+                int n = rec.read(buf, 0, frame);
+                if (n <= 0) continue;
+                total++;
+                double sum = 0;
+                for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
+                double rms = Math.sqrt(sum / n);
+                if (total <= 5) { noise = noise < 0 ? rms : (noise + rms) / 2; continue; }
+                double th = Math.max(noise * 2.0, 250);
+                boolean voice = rms > th;
+                if (!voice) noise = noise * 0.98 + rms * 0.02;
+                byte[] b = toBytes(buf, n);
+                if (frames == 0 && !voice) continue; // 말 없는 구간은 버림
+                chunk.write(b, 0, b.length);
+                frames++;
+                if (voice) { speech++; silent = 0; } else silent++;
+                boolean cut = (frames >= 20 && silent >= 4) || frames >= 80 || (silent >= 15);
+                if (cut) {
+                    if (speech >= 6) sink.onChunk(wav(chunk.toByteArray()));
+                    chunk.reset(); frames = 0; speech = 0; silent = 0;
+                }
+            }
+            if (speech >= 6) sink.onChunk(wav(chunk.toByteArray()));
+        } catch (Exception e) {
+            log.log("연속 녹음 실패: " + e.getMessage());
+        } finally {
+            if (rec != null) { try { rec.stop(); } catch (Exception ignored) { } rec.release(); }
+            if (sco) releaseGlassesMic(am);
+        }
+    }
 
     /** 블루투스(안경) 마이크로 전환. 성공하면 true. */
     public static boolean useGlassesMic(AudioManager am, GlassesBle.Log log) {
@@ -69,6 +125,7 @@ public class AudioQ {
             int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             rec = new AudioRecord(sco ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, RATE));
+            cancel = false;
             beep(sco);
             rec.startRecording();
             log.log((sco ? "안경" : "휴대폰") + " 마이크로 듣는 중… 말씀하세요");
@@ -80,7 +137,7 @@ public class AudioQ {
             double noise = -1;
             boolean speaking = false;
             int silentFrames = 0, total = 0, speechFrames = 0;
-            while (true) {
+            while (!cancel) {
                 int n = rec.read(buf, 0, frame);
                 if (n <= 0) continue;
                 total++;

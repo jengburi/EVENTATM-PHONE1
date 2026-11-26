@@ -31,6 +31,9 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private AppCore core;
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
+    private Button convoBtn, listenBtn;
+    private RadioGroup langGroup;
+    private CheckBox speakerBox, summaryBox, interpMicBox;
     private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox, smartBox, smartFollowBox;
     private RadioGroup modeGroup, rateGroup;
     private ImageView photo;
@@ -92,6 +95,13 @@ public class MainActivity extends Activity implements AppCore.Ui {
         stopBtn.setOnClickListener(v -> core.stopSpeaking());
 
 
+        LinearLayout irow = new LinearLayout(this);
+        col.addView(irow);
+        convoBtn = rowButton(irow, "🗣 대화 통역");
+        convoBtn.setOnClickListener(v -> { saveFields(); if (core.interp.running) core.interp.stop(); else core.interp.start(false); });
+        listenBtn = rowButton(irow, "📺 듣기 통역");
+        listenBtn.setOnClickListener(v -> { saveFields(); if (core.interp.running) core.interp.stop(); else core.interp.start(true); });
+
         answer = new TextView(this);
         answer.setTextSize(18);
         answer.setPadding(0, dp(12), 0, dp(12));
@@ -123,6 +133,26 @@ public class MainActivity extends Activity implements AppCore.Ui {
         promptEdit.setHint("AI에게 할 말을 직접 적어 주세요");
         col.addView(promptEdit);
 
+        // --- 통역 ---
+        col.addView(section("🌐 동시통역"));
+        TextView ih = label("말로도 시킬 수 있어요: \"영어 통역해 줘\", \"지금 뉴스야 통역해 줘\", \"요약해서 통역해 줘\"\n끝낼 때는 안경 버튼 한 번 (대화 통역은 \"통역 그만\"이라고 말해도 돼요)");
+        ih.setTextColor(Color.GRAY);
+        col.addView(ih);
+        col.addView(label("상대방 언어"));
+        langGroup = new RadioGroup(this);
+        LinearLayout lrow1 = new LinearLayout(this), lrow2 = new LinearLayout(this);
+        for (int i = 0; i < Interpreter.LANG_NAMES.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(3000 + i);
+            rb.setText(Interpreter.LANG_NAMES[i]);
+            langGroup.addView(rb);
+        }
+        langGroup.setOnCheckedChangeListener((g, id) -> core.prefs.edit().putString("interpLang", Interpreter.LANG_NAMES[id - 3000]).apply());
+        col.addView(langGroup);
+        speakerBox = check(col, "📢 내 말 번역은 휴대폰 스피커로 크게 (상대방이 듣게)", "interpSpeaker", true);
+        summaryBox = check(col, "✂ 듣기 통역은 요약해서 (핵심만 짧게)", "interpSummary", false);
+        interpMicBox = check(col, "👓 통역 때 안경 마이크 사용 (끄면 휴대폰 마이크, 상대방·TV 소리 듣기엔 휴대폰이 더 좋아요)", "interpGlassesMic", false);
+
         // --- 대화 ---
         col.addView(section("대화"));
         smartBox = check(col, "👓 안경 버튼 = 그냥 물어보기 (끄면 = 바로 찍고 설명)", "buttonSmart", true);
@@ -153,7 +183,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
             serviceBtn.postDelayed(this::updateServiceBtn, 500);
         });
         col.addView(serviceBtn, new LinearLayout.LayoutParams(-1, -2));
-        TextView help = label("버튼에 붙일 수 있는 동작: 그냥물어보기 / 사진 / 자동 / 번역 / 문제 풀이 / 설명 / 쟁부리우드 제품 / 직접 입력 / 다시듣기\n"
+        TextView help = label("버튼에 붙일 수 있는 동작: 그냥물어보기 / 사진 / 통역 / 듣기통역 / 자동 / 번역 / 문제 풀이 / 설명 / 쟁부리우드 제품 / 직접 입력 / 다시듣기\n"
                 + "(비워 두면 위 '안경 버튼' 설정대로, AI가 읽는 중에 누르면 읽기 멈춤)");
         help.setTextColor(Color.GRAY);
         col.addView(help);
@@ -246,6 +276,9 @@ public class MainActivity extends Activity implements AppCore.Ui {
         prevEdit.setText(core.prefs.getString("actPrev", "다시듣기"));
         loadCheck(voiceBox); loadCheck(followBox); loadCheck(galleryBox); loadCheck(mediaBox);
         loadCheck(geminiEarBox); loadCheck(glassesMicBox); loadCheck(smartBox); loadCheck(smartFollowBox);
+        loadCheck(speakerBox); loadCheck(summaryBox); loadCheck(interpMicBox);
+        String lang = core.prefs.getString("interpLang", "자동");
+        for (int i = 0; i < Interpreter.LANG_NAMES.length; i++) if (Interpreter.LANG_NAMES[i].equals(lang)) langGroup.check(3000 + i);
         modeGroup.check(1000 + core.mode());
         promptEdit.setVisibility(core.mode() == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
         float r = core.prefs.getFloat("rate", 1.0f);
@@ -351,7 +384,13 @@ public class MainActivity extends Activity implements AppCore.Ui {
         runOnUiThread(() -> photo.setImageBitmap(bmp));
     }
     @Override public void onBusy(boolean b) {
-        runOnUiThread(() -> { goBtn.setEnabled(!b); againBtn.setEnabled(!b); voiceBtn.setEnabled(!b); });
+        runOnUiThread(() -> {
+            boolean ir = core.interp.running;
+            goBtn.setEnabled(!b); againBtn.setEnabled(!b); voiceBtn.setEnabled(!b);
+            convoBtn.setEnabled(!b || ir); listenBtn.setEnabled(!b || ir);
+            convoBtn.setText(ir && !core.interp.listenMode ? "■ 통역 끝내기" : "🗣 대화 통역");
+            listenBtn.setText(ir && core.interp.listenMode ? "■ 통역 끝내기" : "📺 듣기 통역");
+        });
     }
     @Override public void onHistoryChanged() { runOnUiThread(this::refreshHistory); }
 }

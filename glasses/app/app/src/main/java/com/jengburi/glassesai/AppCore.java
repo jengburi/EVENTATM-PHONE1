@@ -34,7 +34,7 @@ public class AppCore {
             ""
     };
     /** 버튼에 붙일 수 있는 특수 동작 */
-    public static final int ACT_REPLAY = -2, ACT_VOICE_ONLY = -3, ACT_CURRENT = -1, ACT_SMART = -4, ACT_PHOTO = -5;
+    public static final int ACT_REPLAY = -2, ACT_VOICE_ONLY = -3, ACT_CURRENT = -1, ACT_SMART = -4, ACT_PHOTO = -5, ACT_INTERPRET = -6, ACT_LISTEN = -7;
 
     private static AppCore inst;
     public static synchronized AppCore get(Context c) {
@@ -65,6 +65,54 @@ public class AppCore {
             if (s == TextToSpeech.SUCCESS) { tts.setLanguage(Locale.KOREAN); ttsReady = true; }
         });
         ble.listener = this::onPacket;
+        interp = new Interpreter(this);
+    }
+
+    public final Interpreter interp;
+
+    // ---------- 언어별 말하기 (통역용) ----------
+    public void speakQueued(String s, Locale loc) {
+        if (!ttsReady) return;
+        applyRate();
+        tts.setLanguage(loc);
+        tts.speak(s, TextToSpeech.QUEUE_ADD, null, "q" + System.nanoTime());
+    }
+    public boolean isSpeaking() { return ttsReady && tts.isSpeaking(); }
+    public void resetLanguage() { if (ttsReady) tts.setLanguage(Locale.KOREAN); }
+
+    /** 이 언어로 말하고 끝날 때까지 기다림. phoneSpeaker=true 면 휴대폰 스피커로(상대방이 듣게). */
+    public void speakAndWait(String s, Locale loc, boolean phoneSpeaker) {
+        if (!ttsReady) return;
+        applyRate();
+        tts.setLanguage(loc);
+        if (!phoneSpeaker) { sayAndWaitRaw(s, 120); resetLanguage(); return; }
+        try {
+            java.io.File f = new java.io.File(ctx.getCacheDir(), "tts.wav");
+            CountDownLatch l = new CountDownLatch(1);
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override public void onStart(String id) { }
+                @Override public void onDone(String id) { l.countDown(); }
+                @Override public void onError(String id) { l.countDown(); }
+            });
+            tts.synthesizeToFile(s, null, f, "f" + System.nanoTime());
+            l.await(30, TimeUnit.SECONDS);
+            android.media.MediaPlayer mp = new android.media.MediaPlayer();
+            mp.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA).build());
+            mp.setDataSource(f.getAbsolutePath());
+            mp.prepare();
+            android.media.AudioManager am = (android.media.AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+            for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS))
+                if (d.getType() == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { mp.setPreferredDevice(d); break; }
+            CountDownLatch end = new CountDownLatch(1);
+            mp.setOnCompletionListener(m -> end.countDown());
+            speaking = true;
+            mp.start();
+            end.await(60, TimeUnit.SECONDS);
+            speaking = false;
+            mp.release();
+        } catch (Exception e) { log("스피커 재생 실패: " + e.getMessage()); }
+        resetLanguage();
     }
 
     // ---------- 기록 / 말하기 ----------
@@ -76,11 +124,17 @@ public class AppCore {
     public synchronized String logText() { return logBuf.toString(); }
 
     private void applyRate() { if (ttsReady) tts.setSpeechRate(prefs.getFloat("rate", 1.0f)); }
-    public void say(String s) { if (ttsReady) { applyRate(); tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "a"); } }
+    public void say(String s) { if (ttsReady) { applyRate(); resetLanguage(); tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "a"); } }
     public void stopSpeaking() { if (tts != null) tts.stop(); speaking = false; }
 
     /** 다 읽을 때까지 기다림 (최대 sec초). 중간에 멈추면 false. */
     public boolean sayAndWait(String s, int sec) {
+        if (!ttsReady) return false;
+        resetLanguage();
+        return sayAndWaitRaw(s, sec);
+    }
+
+    boolean sayAndWaitRaw(String s, int sec) {
         if (!ttsReady) return false;
         applyRate();
         CountDownLatch l = new CountDownLatch(1);
@@ -138,6 +192,8 @@ public class AppCore {
         s = s.trim();
         if (s.isEmpty()) return ACT_CURRENT;
         if (s.contains("다시")) return ACT_REPLAY;
+        if (s.contains("듣기") || s.contains("뉴스")) return ACT_LISTEN;
+        if (s.contains("통역")) return ACT_INTERPRET;
         if (s.contains("비서") || s.contains("그냥") || s.contains("물어")) return ACT_SMART;
         if (s.contains("사진") || s.contains("찍")) return ACT_PHOTO;
         if (s.contains("말로")) return ACT_VOICE_ONLY;
@@ -167,6 +223,9 @@ public class AppCore {
 
     /** 버튼에 따라 알맞은 동작 실행. */
     public void action(String source, int act) {
+        if (interp.running) { interp.stop(); return; }
+        if (act == ACT_INTERPRET) { interp.start(false); return; }
+        if (act == ACT_LISTEN) { interp.start(true); return; }
         if (speaking && act != ACT_REPLAY) { stopSpeaking(); log("읽기 멈춤"); return; }
         if (act == ACT_REPLAY) { replay(); return; }
         if (act == ACT_VOICE_ONLY || act == ACT_SMART) { smartAsk(source); return; }
@@ -202,6 +261,8 @@ public class AppCore {
             + "만약 답하려면 사용자 눈앞을 봐야 하는 질문이면(예: 이거 뭐야, 저거 뭐야, 앞에 뭐 있어, 이거 번역해 줘, 이거 읽어 줘, 이거 얼마야, 이 문제 풀어 줘) "
             + "다른 말 없이 [사진] 이라고만 답해.\n"
             + "사용자가 '없어', '그만', '끝', '됐어' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.\n"
+            + "사용자가 외국인과의 대화를 통역해 달라고 하면(예: 영어 통역해 줘, 이 사람 말 통역해 줘) 다른 말 없이 [통역:언어] 라고만 답해. 언어를 모르면 [통역:자동].\n"
+            + "사용자가 뉴스, 방송, 강의, 영상처럼 계속 나오는 말을 통역해 달라고 하거나 '지금 뉴스야' 같이 말하면 다른 말 없이 [듣기통역] 이라고만 답해. 요약해 달라고 하면 [듣기통역:요약].\n"
             + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
 
     /** 그냥 물어보기: 말로 묻고, 앞을 봐야 하는 질문이면 자동으로 찍어서 대답. 이어서 대화 가능. */
@@ -226,6 +287,15 @@ public class AppCore {
                     byte[] newPhoto = null;
                     String a = askModel(prompt, photoForChat, wav);
                     if (a.contains("[끝]")) { say("알겠어요"); return; }
+                    if (a.contains("[듣기통역")) {
+                        prefs.edit().putBoolean("interpSummary", a.contains("요약")).apply();
+                        pendingInterp = 2; return;
+                    }
+                    if (a.contains("[통역")) {
+                        String code = Interpreter.codeFromText(a);
+                        prefs.edit().putString("interpLang", code == null ? "자동" : Interpreter.nameOf(code)).apply();
+                        pendingInterp = 1; return;
+                    }
                     if (a.contains("[사진]")) {
                         say("잠깐만요, 볼게요");
                         byte[] jpeg = capturePhoto();
@@ -246,11 +316,18 @@ public class AppCore {
                     log("더 물어보실 게 있으면 삐 소리 뒤에 말씀하세요");
                 }
             } catch (Exception e) { fail(e); }
-            finally { setBusy(false); }
+            finally {
+                setBusy(false);
+                int pi = pendingInterp; pendingInterp = 0;
+                if (pi == 1) interp.start(false);
+                else if (pi == 2) interp.start(true);
+            }
         }).start();
     }
 
-    private String askModel(String prompt, byte[] jpeg, byte[] wav) throws Exception {
+    private volatile int pendingInterp;
+
+    String askModel(String prompt, byte[] jpeg, byte[] wav) throws Exception {
         log("Gemini에게 물어보는 중…");
         Gemini.lastFallbackModel = null;
         String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, wav, this::log);
@@ -272,7 +349,7 @@ public class AppCore {
     }
 
     private android.os.PowerManager.WakeLock wakeLock;
-    private void setBusy(boolean b) {
+    void setBusy(boolean b) {
         busy = b;
         try {
             if (b) {
@@ -285,7 +362,7 @@ public class AppCore {
         } catch (Exception ignored) { }
         Ui u = ui; if (u != null) u.onBusy(b);
     }
-    private void answer(String a) { lastAnswer = a; Ui u = ui; if (u != null) u.onAnswer(a); }
+    void answer(String a) { lastAnswer = a; Ui u = ui; if (u != null) u.onAnswer(a); }
     private void fail(Exception e) {
         String m = e.getMessage() == null ? e.toString() : e.getMessage();
         log("오류: " + m);
