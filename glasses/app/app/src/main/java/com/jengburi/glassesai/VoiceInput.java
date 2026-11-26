@@ -18,10 +18,10 @@ import java.util.concurrent.TimeUnit;
 
 /** 안경(블루투스) 마이크로 한 문장을 듣고 글자로 바꾼다. 백그라운드 스레드에서 호출. */
 public class VoiceInput {
-    public static String listen(Context ctx, int timeoutSec, GlassesBle.Log log) {
+    public static String listen(Context ctx, int timeoutSec, boolean glassesMic, GlassesBle.Log log) {
         if (!SpeechRecognizer.isRecognitionAvailable(ctx)) { log.log("이 휴대폰은 음성 인식을 지원하지 않아요"); return null; }
         AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-        boolean usedBt = useBluetoothMic(am, log);
+        boolean usedBt = glassesMic && useBluetoothMic(am, log);
         Handler main = new Handler(Looper.getMainLooper());
         CountDownLatch done = new CountDownLatch(1);
         final String[] result = {null};

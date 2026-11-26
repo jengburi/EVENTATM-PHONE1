@@ -19,13 +19,17 @@ public class Gemini {
 
     /** 503/429(혼잡)이면 잠시 쉬고 재시도, 모델 칸에 쉼표로 여러 개 적으면 차례로 시도. */
     public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, GlassesBle.Log log) throws Exception {
+        return askWithRetry(apiKey, models, prompt, jpeg, null, log);
+    }
+
+    public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, byte[] wav, GlassesBle.Log log) throws Exception {
         Exception last = null;
         for (String model : models.split(",")) {
             model = model.trim();
             if (model.isEmpty()) continue;
             for (int attempt = 1; attempt <= 3; attempt++) {
                 try {
-                    return ask(apiKey, model, prompt, jpeg);
+                    return ask(apiKey, model, prompt, jpeg, wav);
                 } catch (Exception e) {
                     last = e;
                     String m = String.valueOf(e.getMessage());
@@ -46,7 +50,7 @@ public class Gemini {
                 if (++tried > 5) break;
                 try {
                     log.log(m + " 로 시도");
-                    String a = ask(apiKey, m, prompt, jpeg);
+                    String a = ask(apiKey, m, prompt, jpeg, wav);
                     log.log("성공한 모델: " + m + " (다음부터 이 모델을 먼저 사용)");
                     lastFallbackModel = m;
                     return a;
@@ -81,10 +85,17 @@ public class Gemini {
     }
 
     public static String ask(String apiKey, String model, String prompt, byte[] jpeg) throws Exception {
+        return ask(apiKey, model, prompt, jpeg, null);
+    }
+
+    public static String ask(String apiKey, String model, String prompt, byte[] jpeg, byte[] wav) throws Exception {
         JSONArray parts0 = new JSONArray().put(new JSONObject().put("text", prompt));
         if (jpeg != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
                 .put("mime_type", "image/jpeg")
                 .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))));
+        if (wav != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
+                .put("mime_type", "audio/wav")
+                .put("data", Base64.encodeToString(wav, Base64.NO_WRAP))));
         JSONObject body = new JSONObject().put("contents", new JSONArray()
                 .put(new JSONObject().put("parts", parts0)));
 

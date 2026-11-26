@@ -31,7 +31,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private AppCore core;
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
-    private CheckBox voiceBox, mediaBox, followBox, galleryBox;
+    private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox;
     private RadioGroup modeGroup, rateGroup;
     private ImageView photo;
     private TextView answer, logView;
@@ -126,6 +126,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
         col.addView(section("대화"));
         voiceBox = check(col, "🎤 찍은 뒤 말로 질문하기 (안경 마이크)", "voice", false);
         followBox = check(col, "💬 연속 대화 (대답 뒤 \"더 궁금한 거 있으세요?\" → 이어서 질문, \"없어\"라고 하면 끝)", "followUp", false);
+        geminiEarBox = check(col, "👂 Gemini가 목소리를 직접 듣기 (추천, 웅얼거려도 잘 알아들음)", "geminiListen", true);
+        glassesMicBox = check(col, "👓 안경 마이크 사용 (끄면 휴대폰 마이크)", "glassesMic", true);
         galleryBox = check(col, "🖼 찍은 사진을 휴대폰 갤러리에도 저장 (Pictures/GlassesAI)", "gallery", true);
         col.addView(label("읽는 속도"));
         rateGroup = new RadioGroup(this);
@@ -236,6 +238,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         nextEdit.setText(core.prefs.getString("actNext", "번역"));
         prevEdit.setText(core.prefs.getString("actPrev", "다시듣기"));
         loadCheck(voiceBox); loadCheck(followBox); loadCheck(galleryBox); loadCheck(mediaBox);
+        loadCheck(geminiEarBox); loadCheck(glassesMicBox);
         modeGroup.check(1000 + core.mode());
         promptEdit.setVisibility(core.mode() == AppCore.MODE_NAMES.length - 1 ? View.VISIBLE : View.GONE);
         float r = core.prefs.getFloat("rate", 1.0f);

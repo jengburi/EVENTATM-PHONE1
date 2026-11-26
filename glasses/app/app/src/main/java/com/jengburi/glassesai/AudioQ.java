@@ -1,0 +1,134 @@
+package com.jengburi.glassesai;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.ToneGenerator;
+import android.os.Build;
+
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+/** 말소리를 녹음해서 WAV 로 돌려준다 (말이 끝나면 자동으로 멈춤). Gemini 가 직접 듣게 할 때 사용. */
+public class AudioQ {
+    static final int RATE = 16000;
+
+    /** 블루투스(안경) 마이크로 전환. 성공하면 true. */
+    public static boolean useGlassesMic(AudioManager am, GlassesBle.Log log) {
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                    if (d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                        boolean ok = am.setCommunicationDevice(d);
+                        if (ok) Thread.sleep(900);
+                        return ok;
+                    }
+                }
+                log.log("안경 마이크를 찾지 못해 휴대폰 마이크 사용");
+            } else {
+                am.startBluetoothSco();
+                am.setBluetoothScoOn(true);
+                Thread.sleep(1200);
+                return true;
+            }
+        } catch (Exception e) { log.log("안경 마이크 전환 실패, 휴대폰 마이크 사용"); }
+        return false;
+    }
+
+    public static void releaseGlassesMic(AudioManager am) {
+        try {
+            if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice();
+            else { am.setBluetoothScoOn(false); am.stopBluetoothSco(); }
+        } catch (Exception ignored) { }
+    }
+
+    public static void beep(boolean sco) {
+        try {
+            ToneGenerator tg = new ToneGenerator(sco ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC, 90);
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 180);
+            Thread.sleep(250);
+            tg.release();
+        } catch (Exception ignored) { }
+    }
+
+    /**
+     * 녹음: 말이 시작되면 녹음하고, 말이 끝나고 1.2초 조용하면 멈춘다.
+     * waitSec 안에 말이 없으면 null.
+     */
+    @SuppressLint("MissingPermission")
+    public static byte[] record(Context ctx, boolean glassesMic, int waitSec, int maxSec, GlassesBle.Log log) {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        boolean sco = glassesMic && useGlassesMic(am, log);
+        AudioRecord rec = null;
+        try {
+            int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            rec = new AudioRecord(sco ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, RATE));
+            beep(sco);
+            rec.startRecording();
+            log.log((sco ? "안경" : "휴대폰") + " 마이크로 듣는 중… 말씀하세요");
+
+            int frame = RATE / 10; // 100ms
+            short[] buf = new short[frame];
+            ByteArrayOutputStream pcm = new ByteArrayOutputStream();
+            ByteArrayOutputStream pre = new ByteArrayOutputStream(); // 말 시작 직전 0.5초 보관
+            double noise = -1;
+            boolean speaking = false;
+            int silentFrames = 0, total = 0, speechFrames = 0;
+            while (true) {
+                int n = rec.read(buf, 0, frame);
+                if (n <= 0) continue;
+                total++;
+                double sum = 0;
+                for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
+                double rms = Math.sqrt(sum / n);
+                byte[] bytes = toBytes(buf, n);
+                if (total <= 3) { noise = noise < 0 ? rms : (noise + rms) / 2; pre.write(bytes, 0, bytes.length); continue; }
+                double th = Math.max(noise * 2.5, 350);
+                if (!speaking) {
+                    pre.write(bytes, 0, bytes.length);
+                    byte[] p = pre.toByteArray();
+                    if (p.length > RATE) { pre.reset(); pre.write(p, p.length - RATE, RATE); } // 0.5초분 유지
+                    if (rms > th) { speaking = true; pcm.write(pre.toByteArray(), 0, pre.size()); speechFrames = 1; }
+                    else { noise = noise * 0.95 + rms * 0.05; if (total > waitSec * 10) break; }
+                } else {
+                    pcm.write(bytes, 0, bytes.length);
+                    if (rms > th) { silentFrames = 0; speechFrames++; } else silentFrames++;
+                    if (silentFrames >= 12 || total > maxSec * 10) break;
+                }
+            }
+            if (!speaking || speechFrames < 3) { log.log("말소리가 들리지 않았어요"); return null; }
+            log.log("녹음 완료 (" + String.format("%.1f", pcm.size() / 2.0 / RATE) + "초)");
+            return wav(pcm.toByteArray());
+        } catch (Exception e) {
+            log.log("녹음 실패: " + e.getMessage());
+            return null;
+        } finally {
+            if (rec != null) { try { rec.stop(); } catch (Exception ignored) { } rec.release(); }
+            if (sco) releaseGlassesMic(am);
+        }
+    }
+
+    static byte[] toBytes(short[] s, int n) {
+        ByteBuffer bb = ByteBuffer.allocate(n * 2).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < n; i++) bb.putShort(s[i]);
+        return bb.array();
+    }
+
+    static byte[] wav(byte[] pcm) {
+        ByteBuffer h = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+        h.put("RIFF".getBytes()).putInt(36 + pcm.length).put("WAVE".getBytes())
+                .put("fmt ".getBytes()).putInt(16).putShort((short) 1).putShort((short) 1)
+                .putInt(RATE).putInt(RATE * 2).putShort((short) 2).putShort((short) 16)
+                .put("data".getBytes()).putInt(pcm.length);
+        byte[] out = new byte[44 + pcm.length];
+        System.arraycopy(h.array(), 0, out, 0, 44);
+        System.arraycopy(pcm, 0, out, 44, pcm.length);
+        return out;
+    }
+}

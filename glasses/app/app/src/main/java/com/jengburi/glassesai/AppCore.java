@@ -112,6 +112,26 @@ public class AppCore {
     public boolean followUp() { return prefs.getBoolean("followUp", false); }
     public boolean toGallery() { return prefs.getBoolean("gallery", true); }
     public String triggerCodes() { return prefs.getString("triggers", "97"); }
+    /** true = Gemini 가 녹음을 직접 들음(추천), false = 휴대폰 음성 인식 */
+    public boolean geminiListens() { return prefs.getBoolean("geminiListen", true); }
+    public boolean glassesMic() { return prefs.getBoolean("glassesMic", true); }
+
+    /** 말로 한 질문: 글자(text) 또는 녹음(wav) 중 하나. */
+    static class Question {
+        String text; byte[] wav;
+        boolean empty() { return (text == null || text.trim().isEmpty()) && wav == null; }
+        String label() { return text != null ? text : (wav != null ? "(음성 질문)" : null); }
+    }
+
+    Question listenQuestion(int waitSec) {
+        Question q = new Question();
+        if (geminiListens()) q.wav = AudioQ.record(ctx, glassesMic(), waitSec, 15, this::log);
+        else q.text = VoiceInput.listen(ctx, waitSec + 6, glassesMic(), this::log);
+        return q;
+    }
+
+    static final String AUDIO_HINT = "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 오디오 속 질문을 알아듣고 그 질문에 먼저 답해 줘. "
+            + "질문을 다시 적지 말고 바로 답해. 사용자가 '없어', '그만', '끝' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.";
 
     /** "번역", "1", "다시듣기", "말로만" 같은 이름을 동작 번호로. */
     static int parseAction(String s) {
@@ -181,8 +201,8 @@ public class AppCore {
         new Thread(() -> {
             try {
                 sayAndWait("말씀하세요", 5);
-                String q = VoiceInput.listen(ctx, 12, this::log);
-                if (q == null || q.trim().isEmpty()) { say("못 들었어요"); return; }
+                Question q = listenQuestion(7);
+                if (q.empty()) { say("못 들었어요"); return; }
                 conversation(null, "다음 질문에 한국어로 짧게 답해 줘." + COMMON_TAIL, "말로만", q);
             } catch (Exception e) { fail(e); }
             finally { setBusy(false); }
@@ -257,40 +277,44 @@ public class AppCore {
     }
 
     private void askAndSpeak(byte[] jpeg, int m) throws Exception {
-        String q = null;
+        Question q = null;
         if (voiceQuestion()) {
             sayAndWait("무엇이 궁금하세요?", 5);
-            q = VoiceInput.listen(ctx, 12, this::log);
+            q = listenQuestion(7);
         }
         conversation(jpeg, prompt(m), MODE_NAMES[m], q);
     }
 
     /** 첫 질문 + (연속 대화가 켜져 있으면) 이어지는 질문들. */
-    private void conversation(byte[] jpeg, String basePrompt, String modeName, String firstQ) throws Exception {
+    private void conversation(byte[] jpeg, String basePrompt, String modeName, Question firstQ) throws Exception {
         StringBuilder past = new StringBuilder();
-        String q = firstQ;
+        Question q = firstQ;
         for (int turn = 0; turn < 6; turn++) {
             String prompt = basePrompt;
             if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
-            if (q != null && !q.trim().isEmpty()) prompt += "\n\n사용자 질문 (이 질문에 먼저 답해 줘): " + q;
+            byte[] wav = null;
+            if (q != null && q.text != null && !q.text.trim().isEmpty()) prompt += "\n\n사용자 질문 (이 질문에 먼저 답해 줘): " + q.text;
+            else if (q != null && q.wav != null) { prompt += AUDIO_HINT; wav = q.wav; }
+            String ql = q == null ? null : q.label();
             if (turn == 0) say("분석 중이에요");
-            log("Gemini에게 물어보는 중… (" + modeName + (q != null ? ", 질문: " + q : "") + ")");
+            log("Gemini에게 물어보는 중… (" + modeName + (ql != null ? ", " + ql : "") + ")");
             Gemini.lastFallbackModel = null;
-            String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, this::log);
+            String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, wav, this::log);
+            if (a.contains("[끝]")) { say("알겠어요"); return; }
             String fb = Gemini.lastFallbackModel;
             if (fb != null && !models().contains(fb)) prefs.edit().putString("model", fb + ", " + models()).apply();
             answer(a);
             log("답변 받음");
-            History.save(ctx, turn == 0 ? jpeg : null, modeName, q, a, toGallery());
+            History.save(ctx, turn == 0 ? jpeg : null, modeName, ql, a, toGallery());
             Ui u = ui; if (u != null) u.onHistoryChanged();
-            past.append(q != null ? "사용자: " + q + "\n" : "").append("AI: ").append(a).append("\n");
+            past.append(ql != null ? "사용자: " + ql + "\n" : "").append("AI: ").append(a).append("\n");
 
             if (!followUp()) { say(a); return; }
             boolean finished = sayAndWait(a, 180);
             if (!finished) return; // 읽다가 멈추면 대화 끝
             sayAndWait("더 궁금한 거 있으세요?", 5);
-            q = VoiceInput.listen(ctx, 10, this::log);
-            if (q == null || q.trim().isEmpty() || q.contains("없어") || q.contains("그만") || q.contains("끝")) {
+            q = listenQuestion(6);
+            if (q.empty() || (q.text != null && (q.text.contains("없어") || q.text.contains("그만") || q.text.contains("끝")))) {
                 say("알겠어요");
                 return;
             }
