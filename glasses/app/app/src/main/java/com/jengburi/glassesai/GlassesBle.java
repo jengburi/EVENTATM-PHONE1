@@ -1,0 +1,196 @@
+package com.jengburi.glassesai;
+
+import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
+import android.content.Context;
+
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * S1Pro 안경 BLE 명령 채널 (서비스 0xAA12).
+ * 패킷: 보내기 AB 55 00 LEN CMD DATA.. CHK / 받기 AC 55 00 LEN CMD DATA.. CHK
+ * CHK = (CMD + DATA) 합의 하위 1바이트, LEN = CMD+DATA+CHK 바이트 수.
+ * 모든 메서드는 백그라운드 스레드에서 호출해야 한다(블로킹).
+ */
+@SuppressLint("MissingPermission")
+public class GlassesBle {
+    static final UUID SERVICE = uuid16(0xAA12);
+    static final UUID CMD_CHAR = uuid16(0xAA13);
+    static final UUID NOTIFY_CHAR = uuid16(0xAA14);
+    static final UUID NOTIFY2_CHAR = uuid16(0xAA15);
+    static final UUID CCCD = uuid16(0x2902);
+
+    public static final int CMD_TAKE_PHOTO = 0x22;   // DATA 0x30
+    public static final int EVT_MEDIA_COUNT = 0x42;   // 촬영 완료/미디어 개수
+    public static final int CMD_WIFI_ON = 0x39;       // DATA 0x30 (AP 모드)
+    public static final int EVT_WIFI_SSID = 0x25;     // ASCII SSID
+    public static final int CMD_TRANSFER_END = 0x44;  // DATA 0x30 0x01 = 닫기(파일 유지)
+
+    public interface Log { void log(String s); }
+
+    private final Context ctx;
+    private final Log log;
+    private BluetoothGatt gatt;
+    private BluetoothGattCharacteristic cmdChar;
+    private final LinkedBlockingQueue<byte[]> packets = new LinkedBlockingQueue<>();
+    private final LinkedBlockingQueue<String> gattEvents = new LinkedBlockingQueue<>();
+
+    public GlassesBle(Context ctx, Log log) { this.ctx = ctx; this.log = log; }
+
+    static UUID uuid16(int v) {
+        return UUID.fromString(String.format("0000%04x-0000-1000-8000-00805f9b34fb", v));
+    }
+
+    public static byte[] packet(int cmd, int... data) {
+        byte[] p = new byte[4 + 1 + data.length + 1];
+        p[0] = (byte) 0xAB; p[1] = 0x55; p[2] = 0x00; p[3] = (byte) (data.length + 2);
+        p[4] = (byte) cmd;
+        int sum = cmd;
+        for (int i = 0; i < data.length; i++) { p[5 + i] = (byte) data[i]; sum += data[i]; }
+        p[p.length - 1] = (byte) (sum & 0xFF);
+        return p;
+    }
+
+    public static String hex(byte[] b) {
+        StringBuilder sb = new StringBuilder();
+        for (byte x : b) sb.append(String.format("%02X", x));
+        return sb.toString();
+    }
+
+    public boolean isConnected() { return gatt != null && cmdChar != null; }
+
+    /** 페어링된 기기 중 이름이 S1Pro 로 시작하는 안경에 연결. */
+    public void connect() throws Exception {
+        if (isConnected()) return;
+        BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter ad = bm.getAdapter();
+        if (ad == null || !ad.isEnabled()) throw new Exception("블루투스가 꺼져 있어요");
+        BluetoothDevice dev = null;
+        for (BluetoothDevice d : ad.getBondedDevices()) {
+            String n = d.getName();
+            if (n != null && n.toUpperCase().startsWith("S1PRO")) { dev = d; break; }
+        }
+        if (dev == null) throw new Exception("페어링된 S1Pro 안경을 찾지 못했어요");
+        log.log("안경 연결 중: " + dev.getName());
+        gattEvents.clear();
+        gatt = dev.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE);
+        waitEvent("connected", 15);
+        gatt.discoverServices();
+        waitEvent("services", 15);
+        BluetoothGattService s = gatt.getService(SERVICE);
+        if (s == null) throw new Exception("안경 명령 서비스(AA12)를 찾지 못했어요");
+        cmdChar = s.getCharacteristic(CMD_CHAR);
+        enableNotify(s.getCharacteristic(NOTIFY_CHAR));
+        enableNotify(s.getCharacteristic(NOTIFY2_CHAR));
+        log.log("안경 연결 완료");
+    }
+
+    private void enableNotify(BluetoothGattCharacteristic c) throws Exception {
+        if (c == null) return;
+        gatt.setCharacteristicNotification(c, true);
+        BluetoothGattDescriptor d = c.getDescriptor(CCCD);
+        if (d == null) return;
+        d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+        gatt.writeDescriptor(d);
+        waitEvent("desc", 5);
+    }
+
+    private void waitEvent(String name, int sec) throws Exception {
+        long end = System.currentTimeMillis() + sec * 1000L;
+        while (true) {
+            long left = end - System.currentTimeMillis();
+            if (left <= 0) throw new Exception("안경 응답 시간 초과 (" + name + ")");
+            String e = gattEvents.poll(left, TimeUnit.MILLISECONDS);
+            if (e == null) continue;
+            if (e.equals("disconnected")) throw new Exception("안경 연결이 끊겼어요");
+            if (e.equals(name)) return;
+        }
+    }
+
+    public void send(byte[] p) throws Exception {
+        if (!isConnected()) connect();
+        cmdChar.setValue(p);
+        cmdChar.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        gattEvents.clear();
+        if (!gatt.writeCharacteristic(cmdChar)) throw new Exception("명령 전송 실패");
+        waitEvent("write", 5);
+        log.log("→ " + hex(p));
+    }
+
+    /** 특정 CMD 의 안경 응답을 기다린다. 데이터 부분(CMD 다음~CHK 앞)을 돌려준다. */
+    public byte[] waitFor(int cmd, int sec) throws Exception {
+        long end = System.currentTimeMillis() + sec * 1000L;
+        while (true) {
+            long left = end - System.currentTimeMillis();
+            if (left <= 0) return null;
+            byte[] p = packets.poll(left, TimeUnit.MILLISECONDS);
+            if (p == null) return null;
+            if (p.length >= 6 && (p[0] & 0xFF) == 0xAC && (p[4] & 0xFF) == cmd) {
+                byte[] data = new byte[p.length - 6];
+                System.arraycopy(p, 5, data, 0, data.length);
+                return data;
+            }
+        }
+    }
+
+    public void clearPackets() { packets.clear(); }
+
+    public void takePhoto() throws Exception {
+        clearPackets();
+        send(packet(CMD_TAKE_PHOTO, 0x30));
+        // 촬영 완료 알림(0x42)을 최대 8초 기다림
+        byte[] r = waitFor(EVT_MEDIA_COUNT, 8);
+        log.log(r != null ? "찰칵! 촬영 완료" : "촬영 완료 신호는 못 받았지만 계속 진행");
+    }
+
+    /** 안경 핫스팟을 켜고 SSID 를 돌려준다. */
+    public String wifiOn() throws Exception {
+        clearPackets();
+        send(packet(CMD_WIFI_ON, 0x30));
+        byte[] r = waitFor(EVT_WIFI_SSID, 10);
+        if (r == null) throw new Exception("안경 와이파이 이름을 받지 못했어요");
+        String ssid = new String(r, StandardCharsets.US_ASCII).trim();
+        log.log("안경 와이파이: " + ssid);
+        return ssid;
+    }
+
+    public void transferEnd() {
+        try { send(packet(CMD_TRANSFER_END, 0x30, 0x01)); } catch (Exception ignored) { }
+    }
+
+    public void close() {
+        if (gatt != null) { try { gatt.disconnect(); gatt.close(); } catch (Exception ignored) { } }
+        gatt = null; cmdChar = null;
+    }
+
+    private final BluetoothGattCallback callback = new BluetoothGattCallback() {
+        @Override public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) gattEvents.offer("connected");
+            else if (newState == BluetoothProfile.STATE_DISCONNECTED) { cmdChar = null; gattEvents.offer("disconnected"); }
+        }
+        @Override public void onServicesDiscovered(BluetoothGatt g, int status) { gattEvents.offer("services"); }
+        @Override public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor d, int status) { gattEvents.offer("desc"); }
+        @Override public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) { gattEvents.offer("write"); }
+        @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c, byte[] value) {
+            if (value != null) packets.offer(value.clone());
+        }
+        @SuppressWarnings("deprecation")
+        @Override public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {
+            // Android 12 이하에서 호출됨 (13 이상은 위 메서드)
+            if (android.os.Build.VERSION.SDK_INT >= 33) return;
+            byte[] v = c.getValue();
+            if (v != null) packets.offer(v.clone());
+        }
+    };
+}
