@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
         col.addView(label("모델 이름"));
         modelEdit = new EditText(this);
         modelEdit.setSingleLine();
-        modelEdit.setText(prefs.getString("model", "gemini-2.5-flash"));
+        modelEdit.setText(prefs.getString("model", "gemini-3.8-flash"));
         col.addView(modelEdit);
 
         col.addView(label("AI에게 할 말 (기본 질문)"));
