@@ -261,6 +261,7 @@ public class GlassesBle {
             while (System.currentTimeMillis() < end) {
                 byte[] p = packets.poll(500, TimeUnit.MILLISECONDS);
                 if (p == null || p.length < 3 || (p[0] & 0xFF) != 0x54) continue;
+                log.log("안경 응답: " + hex(java.util.Arrays.copyOf(p, Math.min(p.length, 8))));
                 if ((p[1] == 0x13 && p[2] == 0x02) || (p[1] == 0x04 && p[2] == 0x02)) { ready = true; break; }
             }
             String ssid = jyName + "-" + (jyMac.length() >= 4 ? jyMac.substring(jyMac.length() - 4) : jyMac);

@@ -6,8 +6,8 @@ android {
         applicationId 'com.jengburi.glassesai'
         minSdk 29
         targetSdk 34
-        versionCode 21
-        versionName '2.0'
+        versionCode 22
+        versionName '2.0.1'
     }
     signingConfigs {
         fixedDebug {
@@ -18,7 +18,7 @@ android {
         }
     }
     buildTypes { debug {
-        minifyEnabled true
+        minifyEnabled false
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         signingConfig signingConfigs.fixedDebug
     } }
