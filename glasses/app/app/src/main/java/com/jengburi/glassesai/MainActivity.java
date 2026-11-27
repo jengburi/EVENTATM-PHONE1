@@ -40,7 +40,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private RadioGroup glassesGroup;
     private final java.util.List<String[]> glassesList = new java.util.ArrayList<>();
     private RadioGroup langGroup;
-    private CheckBox speakerBox, summaryBox, interpMicBox, liveBox;
+    private CheckBox speakerBox, summaryBox, interpMicBox, liveBox, paidBox;
     private CheckBox voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox, smartBox, smartFollowBox;
     private RadioGroup modeGroup, rateGroup;
     private ImageView photo;
@@ -165,6 +165,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         speakerBox = check(col, "📢 내 말 번역은 휴대폰 스피커로 크게 (상대방이 듣게)", "interpSpeaker", true);
         summaryBox = check(col, "✂ 듣기 통역은 요약해서 (핵심만 짧게)", "interpSummary", false);
         liveBox = check(col, "⚡ 듣기 통역 실시간 모드 (Gemini Live, 지연 가장 적음 · 안 되면 자동으로 기존 방식)", "liveMode", true);
+        paidBox = check(col, "💳 결제한 키 사용 중 (빠른 통역: 짧게 잘라 3개씩 동시 번역)", "paidKey", false);
         interpMicBox = check(col, "👓 통역 때 안경 마이크 사용 (끄면 휴대폰 마이크, 상대방·TV 소리 듣기엔 휴대폰이 더 좋아요)", "interpGlassesMic", false);
         col.addView(label("마이크 소리 키우기 (작게 들리면 크게, 소리가 깨지면 작게)"));
         gainGroup = new RadioGroup(this);
@@ -374,7 +375,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         prevEdit.setText(core.prefs.getString("actPrev", "다시듣기"));
         loadCheck(voiceBox); loadCheck(followBox); loadCheck(galleryBox); loadCheck(mediaBox);
         loadCheck(geminiEarBox); loadCheck(glassesMicBox); loadCheck(smartBox); loadCheck(smartFollowBox);
-        loadCheck(speakerBox); loadCheck(summaryBox); loadCheck(interpMicBox); loadCheck(liveBox);
+        loadCheck(speakerBox); loadCheck(summaryBox); loadCheck(interpMicBox); loadCheck(liveBox); loadCheck(paidBox);
         String lang = core.prefs.getString("interpLang", "자동");
         for (int i = 0; i < Interpreter.LANG_NAMES.length; i++) if (Interpreter.LANG_NAMES[i].equals(lang)) langGroup.check(3000 + i);
         modeGroup.check(1000 + core.mode());

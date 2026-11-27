@@ -6,8 +6,8 @@ android {
         applicationId 'com.jengburi.glassesai'
         minSdk 29
         targetSdk 34
-        versionCode 31
-        versionName '2.1.4'
+        versionCode 32
+        versionName '2.1.5'
     }
     signingConfigs {
         fixedDebug {

@@ -69,6 +69,8 @@ public class AudioQ {
             int frames = 0, speech = 0, silent = 0, total = 0;
             float g = gain(ctx);
             double meterSum = 0;
+            boolean fast = false;
+            try { fast = AppCore.get(ctx).prefs.getBoolean("paidKey", false); } catch (Exception ignored) { }
             while (running.get()) {
                 int n = rec.read(buf, 0, frame);
                 if (n <= 0) continue;
@@ -88,7 +90,9 @@ public class AudioQ {
                 chunk.write(b, 0, b.length);
                 frames++;
                 if (voice) { speech++; silent = 0; } else silent++;
-                boolean cut = (frames >= 30 && silent >= 5) || frames >= 80 || silent >= 12; // 3초 이상 말한 뒤 0.5초 쉼, 또는 최대 8초
+                boolean cut = fast
+                        ? ((frames >= 15 && silent >= 3) || frames >= 45 || silent >= 10)   // 결제 키: 0.3초 쉼 또는 최대 4.5초
+                        : ((frames >= 30 && silent >= 5) || frames >= 80 || silent >= 12);  // 무료 키: 0.5초 쉼 또는 최대 8초
                 if (cut) {
                     if (speech >= 4) sink.onChunk(wav(chunk.toByteArray()));
                     chunk.reset(); frames = 0; speech = 0; silent = 0;

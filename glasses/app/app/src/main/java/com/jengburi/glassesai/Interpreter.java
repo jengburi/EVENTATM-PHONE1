@@ -143,7 +143,7 @@ public class Interpreter {
     /** 기존 방식: 짧은 조각으로 잘라 최대 3개를 동시에 번역하고, 순서대로 읽기. */
     private String chunkLoop(boolean summary, boolean glassesMic) throws Exception {
         final long[] lastVoice = {System.currentTimeMillis()};
-        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(core.prefs.getBoolean("paidKey", false) ? 3 : 2);
         final java.util.concurrent.ConcurrentHashMap<Integer, String> results = new java.util.concurrent.ConcurrentHashMap<>();
         final int[] nextIn = {0};
         final StringBuilder prev = new StringBuilder();
