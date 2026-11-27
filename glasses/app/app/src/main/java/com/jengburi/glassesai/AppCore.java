@@ -22,8 +22,8 @@ public class AppCore {
     }
 
     static final String COMMON_TAIL = "\n귀로 듣는 답이니 기호, 표, 마크다운 없이 말하듯이 짧게 한국어로 써 줘.";
-    public static final String[] MODE_NAMES = {"자동", "번역", "문제 풀이", "설명", "쟁부리우드 제품", "칼로리 경찰", "냉장고 셰프", "가격 감별사", "동물 속마음", "코디 평가", "직접 입력"};
-    public static final int M_KCAL = 5, M_CHEF = 6, M_PRICE = 7, M_PET = 8, M_STYLE = 9;
+    public static final String[] MODE_NAMES = {"자동", "번역", "문제 풀이", "설명", "쟁부리우드 제품", "칼로리 경찰", "냉장고 셰프", "가격 감별사", "동물 속마음", "코디 평가", "AI 현미경", "직접 입력"};
+    public static final int M_KCAL = 5, M_CHEF = 6, M_PRICE = 7, M_PET = 8, M_STYLE = 9, M_MICRO = 10;
     static final String[] MODE_PROMPTS = {
             "이 사진은 내가 쓴 안경 카메라로 방금 찍은 거야.\n"
                     + "- 메뉴판, 표지판 같은 글자가 있으면 한국어로 번역해서 읽어 줘.\n"
@@ -41,6 +41,8 @@ public class AppCore {
                     + "가격표가 보이면 그 가격이 싼 편인지 비싼 편인지 판단해 줘. 정확하지 않을 수 있다는 말은 짧게만.",
             "사진 속 동물(동물이 없으면 사물)의 지금 속마음을 1인칭으로 웃기게 2~3문장 말해 줘. 표정과 자세를 근거로, 예능 자막처럼.",
             "사진 속 사람(거울 셀카 포함)의 옷차림을 패션 코치처럼 100점 만점으로 점수 매기고, 잘한 점 하나, 아쉬운 점 하나, 팁 하나를 말해 줘. 기분 나쁘지 않게 유쾌하게.",
+            "이 사진은 내시경·접사 카메라로 아주 가까이에서 찍은 확대 사진이야. 무엇인지 알아맞혀 줘. "
+                    + "나무면 수종(예: 월넛, 오크, 편백)과 근거(결, 색, 기공), 작은 글씨면 그대로 읽어 주고, 부품이면 이름과 규격, 식물이면 상태를 말해 줘. 2~4문장.",
             ""
     };
     /** 버튼에 붙일 수 있는 특수 동작 */
@@ -80,10 +82,9 @@ public class AppCore {
         wakeWord = new WakeWord(this);
         features = new Features(this);
         // 예전 버전의 '직접 입력'(5번) 선택 유지
-        if (prefs.getInt("modeVer", 1) < 2) {
-            if (prefs.getInt("mode", 0) == 5) prefs.edit().putInt("mode", MODE_NAMES.length - 1).apply();
-            prefs.edit().putInt("modeVer", 2).apply();
-        }
+        int mv = prefs.getInt("modeVer", 1), cm = prefs.getInt("mode", 0);
+        if ((mv < 2 && cm == 5) || (mv == 2 && cm == 10)) prefs.edit().putInt("mode", MODE_NAMES.length - 1).apply();
+        if (mv < 3) prefs.edit().putInt("modeVer", 3).apply();
     }
 
     public final Features features;
@@ -462,7 +463,7 @@ public class AppCore {
             + "사용자가 '없어', '그만', '끝', '됐어' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.\n"
             + "사용자가 외국인과의 대화를 통역해 달라고 하면(예: 영어 통역해 줘, 이 사람 말 통역해 줘) 다른 말 없이 [통역:언어] 라고만 답해. 언어를 모르면 [통역:자동].\n"
             + "사용자가 뉴스, 방송, 강의, 영상처럼 계속 나오는 말을 통역해 달라고 하거나 '지금 뉴스야' 같이 말하면 다른 말 없이 [듣기통역] 이라고만 답해. 요약해 달라고 하면 [듣기통역:요약].\n"
-            + "사진이 필요한데 특별한 종류면 [사진] 대신: 음식 칼로리는 [사진:칼로리], 냉장고·재료로 요리 추천은 [사진:셰프], 물건 가격이 싼지 비싼지는 [사진:가격], 동물 속마음은 [사진:속마음], 옷차림 평가는 [사진:코디].\n"
+            + "사진이 필요한데 특별한 종류면 [사진] 대신: 음식 칼로리는 [사진:칼로리], 냉장고·재료로 요리 추천은 [사진:셰프], 물건 가격이 싼지 비싼지는 [사진:가격], 동물 속마음은 [사진:속마음], 옷차림 평가는 [사진:코디], 확대해서 자세히 보기(나무 종류, 작은 글씨, 부품)는 [사진:현미경].\n"
             + "길안내를 원하면(예: 서울역 가는 길 알려 줘) [길안내:목적지:도보] 처럼 답해. 방법은 도보, 자동차, 대중교통 중 하나(운전·차 얘기면 자동차, 모르면 도보).\n"
             + "지금 내 위치를 물으면 [위치], 근처 장소를 찾으면(예: 근처 편의점 어디야) [주변:편의점].\n"
             + "주차했다고 하거나 주차 위치 기억해 달라고 하면 [주차], 내 차 어디 있냐고 하면 [내차].\n"
@@ -515,7 +516,7 @@ public class AppCore {
                         if (special.equals("@meeting")) { pendingInterp = 3; return; }
                         a = special;
                         speakQueued(a, Locale.KOREAN);
-                    } else if (a.contains("[사진") && !ble.canFetchPhoto()) {
+                    } else if (a.contains("[사진") && !canPhoto()) {
                         a = "이 안경은 아직 사진을 휴대폰으로 가져올 수 없어서, 보는 질문에는 답하기 어려워요. 다른 건 물어보세요.";
                         speakQueued(a, Locale.KOREAN);
                     } else if (a.contains("[사진")) {
@@ -561,6 +562,7 @@ public class AppCore {
         if (a.contains("[사진:가격")) return M_PRICE;
         if (a.contains("[사진:속마음")) return M_PET;
         if (a.contains("[사진:코디")) return M_STYLE;
+        if (a.contains("[사진:현미경")) return M_MICRO;
         return mode();
     }
 
@@ -706,8 +708,20 @@ public class AppCore {
 
     byte[] capturePhotoPublic() throws Exception { return capturePhoto(); }
 
+    /** 사진을 어디서 찍나: 안경 / USB 카메라(내시경·웹캠) */
+    public boolean usbMode() { return prefs.getString("camSource", "안경").contains("USB"); }
+    public boolean canPhoto() { return usbMode() || ble.canFetchPhoto(); }
+
     /** 안경으로 찍고 사진을 받아 온다 (와이파이 전환 포함). */
     private byte[] capturePhoto() throws Exception {
+        if (usbMode()) {
+            say("찍을게요");
+            byte[] jpeg = UsbCam.capture(ctx, this::log);
+            log("USB 카메라 사진 " + jpeg.length / 1024 + "KB");
+            lastJpeg = jpeg;
+            Ui u = ui; if (u != null) u.onPhoto(jpeg);
+            return jpeg;
+        }
         ble.connect();
             say("찍을게요");
             ble.takePhoto();

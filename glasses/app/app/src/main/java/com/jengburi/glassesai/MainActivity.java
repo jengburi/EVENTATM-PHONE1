@@ -51,7 +51,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private CompoundButton wakeBox, uploadBox, speakerBox, summaryBox, interpMicBox, liveBox, paidBox, suggestBox;
     private CompoundButton voiceBox, mediaBox, followBox, galleryBox, geminiEarBox, glassesMicBox, smartBox, smartFollowBox;
     private final List<CompoundButton> checks = new ArrayList<>();
-    private Chips langChips, rateChips, gainChips, modeChips, mapChips;
+    private Chips langChips, rateChips, gainChips, modeChips, mapChips, camChips;
     private RadioGroup glassesGroup;
     private final List<String[]> glassesList = new ArrayList<>();
 
@@ -246,6 +246,9 @@ public class MainActivity extends Activity implements AppCore.Ui {
         LinearLayout r3 = gridRow(col);
         feat(r3, "👗", "코디 평가", "\"오늘 옷 어때?\"", BLUE, () -> core.trigger("기능 카드", AppCore.M_STYLE));
         feat(r3, "🕵", "팩트 체크", "\"방금 그 말 사실이야?\"", RED, () -> core.feature("팩트"));
+        LinearLayout r3b = gridRow(col);
+        feat(r3b, "🔬", "AI 현미경", "\"이거 무슨 나무야?\" (내시경)", GREEN, () -> core.trigger("기능 카드", AppCore.M_MICRO));
+        r3b.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
 
         col.addView(groupTitle("🗺 이동"));
         LinearLayout r4 = gridRow(col);
@@ -357,7 +360,13 @@ public class MainActivity extends Activity implements AppCore.Ui {
         paidBox = sw(s1, "💳 결제한 키 사용 중 (통역·대답 더 빠르게)", "paidKey", false);
 
         // 2. 안경
-        LinearLayout s2 = fold(col, "👓 안경 연결", false);
+        LinearLayout s2 = fold(col, "👓 안경 · 카메라 연결", false);
+        s2.addView(label("사진 찍는 카메라"));
+        String[] cams = {"👓 안경 카메라", "🔌 USB 카메라 (내시경·웹캠)"};
+        camChips = new Chips(s2, cams, 2, i -> core.prefs.edit().putString("camSource", i == 1 ? "USB" : "안경").apply());
+        s2.addView(hint("USB 카메라: 휴대폰에 꽂고 아래 '시험 촬영'을 한 번 눌러 허용해 주세요. 버튼·호출어·블루투스 이어폰 버튼으로 찍을 수 있어요."));
+        wideBtn(s2, "📷 USB 카메라 시험 촬영").setOnClickListener(v -> testUsbCam());
+        s2.addView(label("안경"));
         s2.addView(hint("페어링된 S1Pro / M88 중에서 고르세요."));
         glassesGroup = new RadioGroup(this);
         s2.addView(glassesGroup);
@@ -532,6 +541,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         float g = core.prefs.getFloat("micGain", 3.0f);
         for (int i = 0; i < GAINS.length; i++) if (Math.abs(GAINS[i] - g) < 0.01) gainChips.select(i, false);
         mapChips.select(core.prefs.getString("mapApp", "네이버").contains("구글") ? 1 : 0, false);
+        camChips.select(core.usbMode() ? 1 : 0, false);
         updateKcal();
         updateKeyStatus();
     }
@@ -607,6 +617,28 @@ public class MainActivity extends Activity implements AppCore.Ui {
             loadFields();
             toast(n > 0 ? "✅ " + n + "개 넣었어요: " + got.toString().trim() : "넣을 설정을 찾지 못했어요. 4줄을 다시 복사해 주세요.");
         } catch (Exception e) { toast("붙여넣기 실패: " + e.getMessage()); }
+    }
+
+    private void testUsbCam() {
+        if (core.busy) { toast("다른 작업 중이에요"); return; }
+        if (!UsbCam.connected(this)) { toast("USB 카메라가 안 보여요. 꽂혀 있는지 확인해 주세요 (OTG 젠더 필요할 수 있어요)"); return; }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, 2);
+            toast("카메라 권한을 허용한 뒤 다시 눌러 주세요");
+            return;
+        }
+        toast("USB 카메라로 찍는 중…");
+        new Thread(() -> {
+            try {
+                byte[] j = UsbCam.capture(this, core::log);
+                core.lastJpeg = j;
+                runOnUiThread(() -> { onPhoto(j); answer.setText("✅ USB 카메라 사진을 받았어요! 이제 '사진 찍는 카메라'를 USB로 고르면 돼요."); showTab(0); });
+            } catch (Exception e) {
+                String m = e.getMessage();
+                runOnUiThread(() -> toast("❌ " + m));
+                core.log("USB 카메라 실패: " + m);
+            }
+        }).start();
     }
 
     private void updateKeyStatus() {
@@ -903,6 +935,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         List<String> need = new ArrayList<>();
         need.add(Manifest.permission.ACCESS_FINE_LOCATION);
         need.add(Manifest.permission.RECORD_AUDIO);
+        need.add(Manifest.permission.CAMERA);
         if (Build.VERSION.SDK_INT >= 31) {
             need.add(Manifest.permission.BLUETOOTH_CONNECT);
             need.add(Manifest.permission.BLUETOOTH_SCAN);

@@ -178,7 +178,7 @@ public class Features {
         else e.remove("parkLat").remove("parkLng");
         e.apply();
         String note = "";
-        if (core.ble.canFetchPhoto()) {
+        if (core.canPhoto()) {
             try {
                 core.say("주차 위치를 찍어 둘게요");
                 byte[] jpeg = core.capturePhotoPublic();
