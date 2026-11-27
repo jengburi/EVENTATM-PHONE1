@@ -154,6 +154,7 @@ public class AudioQ {
         try { AppCore.get(ctx).wakeWord.pauseNow(); } catch (Exception ignored) { }
         AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
         boolean sco = glassesMic && useGlassesMic(am, log);
+        boolean scoDead = false;
         AudioRecord rec = null;
         try {
             int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -171,6 +172,7 @@ public class AudioQ {
             double noise = -1;
             boolean speaking = false;
             int silentFrames = 0, total = 0, speechFrames = 0;
+            double scoMax = 0;
             float g = gain(ctx);
             while (!cancel) {
                 int n = rec.read(buf, 0, frame);
@@ -181,6 +183,7 @@ public class AudioQ {
                 for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
                 double rms = Math.sqrt(sum / n);
                 if (total % 5 == 0) { try { AppCore.get(ctx).micRms = rms; } catch (Exception ignored) { } }
+                if (sco) { scoMax = Math.max(scoMax, rms); if (total == 15 && scoMax < 30) { scoDead = true; break; } }
                 byte[] bytes = toBytes(buf, n);
                 if (total <= 3) { noise = noise < 0 ? rms : (noise + rms) / 2; pre.write(bytes, 0, bytes.length); continue; }
                 double th = Math.max(noise * 2.0, 250);
@@ -195,6 +198,12 @@ public class AudioQ {
                     if (rms > th) { silentFrames = 0; speechFrames++; } else silentFrames++;
                     if (silentFrames >= 12 || total > maxSec * 10) break;
                 }
+            }
+            if (scoDead) {
+                log.log("안경 마이크에서 소리가 안 들어와서 휴대폰 마이크로 바꿀게요");
+                rec.stop(); rec.release(); rec = null;
+                releaseGlassesMic(am); sco = false;
+                return record(ctx, false, waitSec, maxSec, log);
             }
             if (!speaking || speechFrames < 3) { log.log("말소리가 들리지 않았어요"); return null; }
             log.log("녹음 완료 (" + String.format("%.1f", pcm.size() / 2.0 / RATE) + "초)");

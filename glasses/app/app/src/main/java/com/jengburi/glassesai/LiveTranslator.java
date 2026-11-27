@@ -43,7 +43,7 @@ public class LiveTranslator {
     /** Live 를 지원하는 모델 이름 찾기 (설정값 우선). */
     String findModel() {
         String saved = core.prefs.getString("liveModel", "");
-        if (!saved.isEmpty()) return saved;
+        if (!saved.isEmpty() && saved.contains("gemini")) return saved;
         try {
             java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(
                     "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").openConnection();
@@ -58,6 +58,7 @@ public class LiveTranslator {
                 JSONObject m = arr.getJSONObject(i);
                 String name = m.optString("name").replace("models/", "");
                 if (!String.valueOf(m.optJSONArray("supportedGenerationMethods")).contains("bidiGenerateContent")) continue;
+                if (!name.contains("gemini")) continue; // genie 같은 다른 모델은 제외
                 if (name.contains("native-audio") || name.contains("audio")) { if (bestAudio == null || name.compareTo(bestAudio) > 0) bestAudio = name; }
                 else if (best == null || name.compareTo(best) > 0) best = name;
             }
