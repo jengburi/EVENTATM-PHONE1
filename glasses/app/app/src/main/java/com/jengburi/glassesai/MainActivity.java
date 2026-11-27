@@ -33,6 +33,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
     private Button convoBtn, listenBtn;
     private CheckBox wakeBox;
+    private RadioGroup gainGroup;
     private EditText wakeEdit;
     private EditText uploadUrlEdit, uploadKeyEdit;
     private CheckBox uploadBox;
@@ -165,6 +166,20 @@ public class MainActivity extends Activity implements AppCore.Ui {
         summaryBox = check(col, "✂ 듣기 통역은 요약해서 (핵심만 짧게)", "interpSummary", false);
         liveBox = check(col, "⚡ 듣기 통역 실시간 모드 (Gemini Live, 지연 가장 적음 · 안 되면 자동으로 기존 방식)", "liveMode", true);
         interpMicBox = check(col, "👓 통역 때 안경 마이크 사용 (끄면 휴대폰 마이크, 상대방·TV 소리 듣기엔 휴대폰이 더 좋아요)", "interpGlassesMic", false);
+        col.addView(label("마이크 소리 키우기 (작게 들리면 크게, 소리가 깨지면 작게)"));
+        gainGroup = new RadioGroup(this);
+        gainGroup.setOrientation(LinearLayout.HORIZONTAL);
+        final float[] GAINS = {1f, 2f, 3f, 4f};
+        for (int i = 0; i < GAINS.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(5000 + i);
+            rb.setText((int) GAINS[i] + "배");
+            gainGroup.addView(rb);
+        }
+        float curGain = core.prefs.getFloat("micGain", 3.0f);
+        for (int i = 0; i < GAINS.length; i++) if (Math.abs(GAINS[i] - curGain) < 0.01) gainGroup.check(5000 + i);
+        gainGroup.setOnCheckedChangeListener((g, id) -> core.prefs.edit().putFloat("micGain", GAINS[id - 5000]).apply());
+        col.addView(gainGroup);
 
         // --- 대화 ---
         col.addView(section("대화"));

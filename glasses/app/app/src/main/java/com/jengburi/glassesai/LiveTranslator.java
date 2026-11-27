@@ -129,9 +129,15 @@ public class LiveTranslator {
                     rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate * 2));
             rec.startRecording();
             short[] buf = new short[frame];
+            float g = AudioQ.gain(core.ctx);
+            int cnt = 0; double msum = 0;
             while (running.get() && !closed) {
                 int n = rec.read(buf, 0, frame);
                 if (n <= 0) continue;
+                AudioQ.applyGain(buf, n, g);
+                double sq = 0; for (int i = 0; i < n; i++) sq += (double) buf[i] * buf[i];
+                msum += Math.sqrt(sq / n);
+                if (++cnt % 20 == 0) { core.log(AudioQ.meter(msum / 20)); msum = 0; }
                 byte[] pcm = AudioQ.toBytes(buf, n);
                 JSONObject msg = new JSONObject().put("realtimeInput", new JSONObject()
                         .put("audio", new JSONObject()

@@ -21,6 +21,29 @@ public class AudioQ {
     public static volatile boolean cancel;
 
     public interface ChunkSink { void onChunk(byte[] wav); }
+
+    /** 마이크 소리 키우기 배율 (설정 'micGain', 기본 3배) */
+    static float gain(Context ctx) {
+        try { return AppCore.get(ctx).prefs.getFloat("micGain", 3.0f); } catch (Exception e) { return 3.0f; }
+    }
+
+    /** 소리 키우기 (찢어지지 않게 부드럽게 잘라냄) */
+    static void applyGain(short[] b, int n, float g) {
+        if (g <= 1.01f) return;
+        for (int i = 0; i < n; i++) {
+            float v = b[i] * g;
+            if (v > 32767f) v = 32767f; else if (v < -32768f) v = -32768f;
+            b[i] = (short) v;
+        }
+    }
+
+    /** 진행 기록용 소리 크기 막대 */
+    static String meter(double rms) {
+        int bars = (int) Math.min(5, Math.round(Math.log10(Math.max(rms, 1)) * 1.6));
+        StringBuilder sb = new StringBuilder("🎤 ");
+        for (int i = 0; i < 5; i++) sb.append(i < bars ? "▮" : "▯");
+        return sb.append(rms < 80 ? "  (거의 안 들려요)" : "").toString();
+    }
     public interface Running { boolean get(); }
 
     /**
@@ -44,15 +67,20 @@ public class AudioQ {
             ByteArrayOutputStream chunk = new ByteArrayOutputStream();
             double noise = -1;
             int frames = 0, speech = 0, silent = 0, total = 0;
+            float g = gain(ctx);
+            double meterSum = 0;
             while (running.get()) {
                 int n = rec.read(buf, 0, frame);
                 if (n <= 0) continue;
                 total++;
+                applyGain(buf, n, g);
                 double sum = 0;
                 for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
                 double rms = Math.sqrt(sum / n);
+                meterSum += rms;
+                if (total % 20 == 0) { log.log(meter(meterSum / 20)); meterSum = 0; }
                 if (total <= 5) { noise = noise < 0 ? rms : (noise + rms) / 2; continue; }
-                double th = Math.max(noise * 2.0, 250);
+                double th = Math.max(noise * 1.6, 180);
                 boolean voice = rms > th;
                 if (!voice) noise = noise * 0.98 + rms * 0.02;
                 byte[] b = toBytes(buf, n);
@@ -62,7 +90,7 @@ public class AudioQ {
                 if (voice) { speech++; silent = 0; } else silent++;
                 boolean cut = (frames >= 15 && silent >= 3) || frames >= 45 || silent >= 10; // 0.3초 쉼 또는 최대 4.5초
                 if (cut) {
-                    if (speech >= 6) sink.onChunk(wav(chunk.toByteArray()));
+                    if (speech >= 4) sink.onChunk(wav(chunk.toByteArray()));
                     chunk.reset(); frames = 0; speech = 0; silent = 0;
                 }
             }
@@ -139,16 +167,18 @@ public class AudioQ {
             double noise = -1;
             boolean speaking = false;
             int silentFrames = 0, total = 0, speechFrames = 0;
+            float g = gain(ctx);
             while (!cancel) {
                 int n = rec.read(buf, 0, frame);
                 if (n <= 0) continue;
                 total++;
+                applyGain(buf, n, g);
                 double sum = 0;
                 for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
                 double rms = Math.sqrt(sum / n);
                 byte[] bytes = toBytes(buf, n);
                 if (total <= 3) { noise = noise < 0 ? rms : (noise + rms) / 2; pre.write(bytes, 0, bytes.length); continue; }
-                double th = Math.max(noise * 2.5, 350);
+                double th = Math.max(noise * 2.0, 250);
                 if (!speaking) {
                     pre.write(bytes, 0, bytes.length);
                     byte[] p = pre.toByteArray();
