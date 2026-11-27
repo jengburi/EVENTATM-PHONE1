@@ -359,6 +359,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
             int b = core.ble.battery;
             String conn = core.ble.isConnected() ? (core.ble.jianyun ? "M88 연결됨" : "S1Pro 연결됨") : "안경 연결 안 됨";
             String mic = (core.interp.running && core.micRms >= 0) ? "\n" + AudioQ.meter(core.micRms) : "";
+            if (core.wakeWord.isRunning() && !core.busy)
+                mic += "\n👂 호출어 대기 중" + (core.wakeWord.lastHeard.isEmpty() ? "" : " · 들은 말: " + core.wakeWord.lastHeard);
             batteryView.setText(conn + (b >= 0 ? "  ·  🔋 " + b + "%" + (core.ble.charging ? " (충전 중)" : "") : "  ·  🔋 확인 중 (누르면 새로고침)") + mic);
             batteryView.postDelayed(this, 1000);
         }

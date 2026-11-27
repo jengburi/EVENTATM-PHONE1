@@ -22,6 +22,9 @@ public class WakeWord {
     private SpeechRecognizer sr;
     private volatile boolean running;
     private boolean muted;
+    private volatile boolean preferOffline = true;
+    /** 마지막으로 알아들은 말 (화면 표시용) */
+    public volatile String lastHeard = "";
 
     WakeWord(AppCore core) { this.core = core; }
 
@@ -70,6 +73,21 @@ public class WakeWord {
         java.util.List<String> keys = new ArrayList<>();
         keys.add(base);
         if (base.equals("쟁부리")) { keys.add("장부리"); keys.add("잼부리"); keys.add("젱부리"); keys.add("쟁불이"); keys.add("쟁부이"); keys.add("쟁보리"); }
+        // 기본 호출어가 '쟁부리'면 '○부리'로 들려도 인정 (장부리·챙부리·생부리 등)
+        if (base.equals("쟁부리")) {
+            int i = h.indexOf("부리");
+            if (i >= 1) {
+                String rest = h.substring(i + 2);
+                if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
+                return rest;
+            }
+            int j = h.indexOf("부이");
+            if (j >= 1 && (h.charAt(j - 1) == '쟁' || h.charAt(j - 1) == '장')) {
+                String rest = h.substring(j + 2);
+                if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
+                return rest;
+            }
+        }
         for (String k : keys) {
             int i = h.indexOf(k);
             if (i >= 0) {
@@ -108,7 +126,7 @@ public class WakeWord {
             it.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR");
             it.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
             it.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-            it.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+            it.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline);
             it.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200);
             sr.startListening(it);
         } catch (Exception e) {
@@ -119,6 +137,7 @@ public class WakeWord {
     private boolean handle(Bundle b, boolean finalResult) {
         ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (r == null) return false;
+        if (!r.isEmpty() && r.get(0) != null && !r.get(0).trim().isEmpty()) lastHeard = r.get(0);
         for (String heard : r) {
             String rest = match(heard);
             if (rest == null) continue;
@@ -148,6 +167,11 @@ public class WakeWord {
             if (!handle(b, true)) main.postDelayed(WakeWord.this::listen, 150);
         }
         @Override public void onError(int e) {
+            // 오프라인 한국어 음성 데이터가 없으면 온라인 인식으로
+            if (preferOffline && (e == 12 || e == 13 || e == SpeechRecognizer.ERROR_SERVER || e == SpeechRecognizer.ERROR_NETWORK)) {
+                preferOffline = false;
+                core.log("오프라인 음성 인식이 안 돼서 온라인 인식으로 바꿀게요 (오류 " + e + ")");
+            }
             int delay = (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) ? 1500 : 250;
             if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && sr != null) { try { sr.destroy(); } catch (Exception ignored) { } sr = null; }
             main.postDelayed(WakeWord.this::listen, delay);
