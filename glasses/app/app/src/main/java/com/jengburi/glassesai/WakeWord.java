@@ -186,31 +186,60 @@ public class WakeWord {
         }
     }
 
-    private boolean handle(Bundle b, boolean finalResult) {
+    /** 부분 결과로 들은 마지막 말 (최종 결과가 안 오는 휴대폰 대비) */
+    private String lastPartial = "";
+    private long fired = 0;
+    private final Runnable partialTimeout = () -> {
+        // 부분 결과에서 호출어가 들렸는데 0.9초 동안 말이 더 없으면 그대로 실행
+        if (!lastPartial.isEmpty()) fire(lastPartial, "부분");
+    };
+
+    /** 호출어가 들어 있으면 AI 실행. 실행했으면 true. */
+    private boolean fire(String heard, String how) {
+        String rest = match(heard);
+        if (rest == null) return false;
+        if (System.currentTimeMillis() - fired < 3000) return false;
+        fired = System.currentTimeMillis();
+        main.removeCallbacks(partialTimeout);
+        lastPartial = "";
+        destroy();
+        mute(false);
+        core.log("✅ 호출어 들림: \"" + heard + "\"");
+        if (core.busy) core.log("다른 작업 중이라 호출어를 건너뛰었어요");
+        final String q = rest.trim();
+        new Thread(() -> core.wake(q)).start();
+        main.postDelayed(this::listen, 2000);
+        return true;
+    }
+
+    private void handlePartial(Bundle b) {
         ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (r == null || r.isEmpty()) return false;
-        if (r.get(0) != null && !r.get(0).trim().isEmpty()) lastHeard = r.get(0);
-        // 부분 결과에서 호출어만 말한 경우도 바로 깨우기 (빠르게)
-        for (String heard : r) {
-            String rest = match(heard);
-            if (rest == null) continue;
-            if (!finalResult && !rest.trim().isEmpty()) return false; // 질문을 이어서 말하는 중 → 끝까지 듣기
-            if (!finalResult) {
-                // 호출어만 들림: 0.6초 더 기다려 보고 이어지는 말이 없으면 결과를 기다림
-                return false;
+        if (r == null || r.isEmpty() || r.get(0) == null || r.get(0).trim().isEmpty()) return;
+        String heard = r.get(0);
+        lastHeard = heard;
+        main.removeCallbacks(partialTimeout);
+        for (String h : r) {
+            if (h != null && match(h) != null) {
+                lastPartial = h;
+                // 이어서 질문을 말하는 중이면 조금 더 기다림
+                main.postDelayed(partialTimeout, match(h).trim().isEmpty() ? 900 : 1500);
+                return;
             }
-            destroy();
-            mute(false);
-            core.log("✅ 호출어 들림: \"" + heard + "\"");
-            final String q = rest.trim();
-            main.post(() -> core.wake(q));
-            main.postDelayed(this::listen, 1500);
-            return true;
         }
-        if (finalResult && !r.get(0).equals(lastLogged)) {
-            lastLogged = r.get(0);
-            core.log("👂 들은 말: \"" + r.get(0) + "\" (호출어 아님)");
+        lastPartial = "";
+    }
+
+    private boolean handleFinal(Bundle b) {
+        main.removeCallbacks(partialTimeout);
+        ArrayList<String> r = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if (r != null) for (String h : r) if (h != null && fire(h, "최종")) return true;
+        if (!lastPartial.isEmpty() && fire(lastPartial, "부분")) return true;
+        String first = (r != null && !r.isEmpty() && r.get(0) != null) ? r.get(0) : "";
+        if (!first.trim().isEmpty()) {
+            lastHeard = first;
+            if (!first.equals(lastLogged)) { lastLogged = first; core.log("👂 들은 말: \"" + first + "\" (호출어 아님)"); }
         }
+        lastPartial = "";
         return false;
     }
 
@@ -239,13 +268,16 @@ public class WakeWord {
         @Override public void onRmsChanged(float v) { }
         @Override public void onBufferReceived(byte[] b) { }
         @Override public void onEndOfSpeech() { }
-        @Override public void onPartialResults(Bundle b) { handle(b, false); }
+        @Override public void onPartialResults(Bundle b) { handlePartial(b); }
         @Override public void onEvent(int t, Bundle b) { }
         @Override public void onResults(Bundle b) {
             badErrors = 0;
-            if (!handle(b, true)) main.postDelayed(WakeWord.this::listen, 100);
+            if (!handleFinal(b)) main.postDelayed(WakeWord.this::listen, 100);
         }
         @Override public void onError(int e) {
+            // 최종 결과 없이 끝나도 부분 결과에 호출어가 있었으면 실행
+            main.removeCallbacks(partialTimeout);
+            if (!lastPartial.isEmpty() && fire(lastPartial, "부분")) return;
             boolean normal = e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
             if (!normal) {
                 if (e != lastErr) core.log("호출어 인식 문제: " + errName(e) + " (코드 " + e + ", " + modeName() + ")");
