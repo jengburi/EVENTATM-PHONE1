@@ -50,7 +50,10 @@ public class GlassesService extends Service {
                 type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
             if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                 type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
-            startForeground(1, n, type);
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+            try { startForeground(1, n, type); }
+            catch (Exception e) { startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE); }
         } else if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         else startForeground(1, n);
         running = true;
