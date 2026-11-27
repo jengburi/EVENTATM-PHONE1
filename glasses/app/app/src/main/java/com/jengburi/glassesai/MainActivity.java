@@ -80,7 +80,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         scroll.addView(col);
 
         TextView title = new TextView(this);
-        title.setText("안경 AI (S1Pro · M88 + Gemini)");
+        title.setText("쟁돌이 AI 안경 컨트롤러");
         title.setTextSize(22);
         col.addView(title);
         batteryView = new TextView(this);
@@ -371,7 +371,11 @@ public class MainActivity extends Activity implements AppCore.Ui {
         glassesGroup.removeAllViews();
         glassesList.clear();
         glassesList.add(new String[]{"자동 (S1Pro / M88 이름으로 찾기)", ""});
-        glassesList.addAll(core.ble.bondedList());
+        // S1Pro, M88 안경만 보여 주기 (다른 블루투스 기기는 숨김)
+        for (String[] g : core.ble.bondedList()) {
+            String n = g[0].toUpperCase().replace(" ", "");
+            if (n.contains("S1PRO") || n.contains("M88")) glassesList.add(g);
+        }
         String cur = core.prefs.getString("glassesAddr", "");
         for (int i = 0; i < glassesList.size(); i++) {
             RadioButton rb = new RadioButton(this);
