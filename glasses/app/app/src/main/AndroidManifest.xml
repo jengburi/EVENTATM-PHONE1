@@ -38,7 +38,9 @@
         <package android:name="com.google.android.apps.maps" />
     </queries>
     <application
-        android:label="쟁부리 AI 안경 컨트롤러"
+        android:label="쟁부리 AI 안경"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" android:launchMode="singleTop">
@@ -46,17 +48,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
-            </intent-filter>
-            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/usb_camera_filter" />
         </activity>
-        <service android:name=".RemoteService" android:exported="true"
-            android:label="쟁부리 리모컨"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/remote_service" />
-        </service>
         <service android:name=".GlassesService" android:exported="false"
             android:foregroundServiceType="connectedDevice|microphone|location|camera" />
     </application>

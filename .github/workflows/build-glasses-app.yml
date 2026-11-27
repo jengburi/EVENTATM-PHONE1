@@ -25,21 +25,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk glasses-ai.apk
+      - name: Build debug APKs (full + share)
+        run: gradle :app:assembleFullDebug :app:assembleShareDebug --no-daemon --stacktrace
+      - name: Rename APKs
+        run: |
+          cp app/build/outputs/apk/full/debug/app-full-debug.apk glasses-ai.apk
+          cp app/build/outputs/apk/share/debug/app-share-debug.apk glasses-ai-share.apk
       - uses: actions/upload-artifact@v4
         with:
           name: glasses-ai-apk
-          path: glasses/app/glasses-ai.apk
+          path: |
+            glasses/app/glasses-ai.apk
+            glasses/app/glasses-ai-share.apk
       - name: Publish APK to apk-builds branch
         run: |
-          mkdir -p /tmp/out && cp glasses-ai.apk /tmp/out/
+          mkdir -p /tmp/out && cp glasses-ai.apk glasses-ai-share.apk /tmp/out/
           cd /tmp/out
           git init -q -b apk-builds
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          git add glasses-ai.apk
+          git add glasses-ai.apk glasses-ai-share.apk
           git commit -q -m "glasses-ai.apk from ${GITHUB_SHA}"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds

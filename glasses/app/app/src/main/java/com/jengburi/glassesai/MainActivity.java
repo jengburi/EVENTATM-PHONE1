@@ -85,7 +85,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
         updateServiceBtn();
         refreshHistory();
         refreshGlasses();
-        if (core.key().isEmpty()) showTab(3);
+        onboard.setVisibility(core.key().isEmpty() ? View.VISIBLE : View.GONE);
+        if (!BuildConfig.FULL && !core.prefs.getBoolean("agreed", false)) showAgreement();
     }
 
     @Override protected void onPause() {
@@ -161,7 +162,26 @@ public class MainActivity extends Activity implements AppCore.Ui {
     }
 
     // ============================ 홈 ============================
+    private LinearLayout onboard;
+
     private void buildHome(LinearLayout col) {
+        // 처음 쓰는 분용 안내 (API 키가 없을 때만 보임)
+        onboard = card(col);
+        onboard.setBackground(round(0xFF2A2210, 18));
+        onboard.addView(text("👋 처음 설정 (3단계, 5분)", 16, ACC, true));
+        onboard.addView(hint("AI가 대답하려면 무료 '제미나이 API 키'가 하나 필요해요. 키는 본인 구글 계정으로 각자 받아요."));
+        wideBtn(onboard, "① 키 받으러 가기 (구글 AI 스튜디오)").setOnClickListener(v -> {
+            try { startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://aistudio.google.com/apikey"))); }
+            catch (Exception e) { toast("인터넷 브라우저를 열지 못했어요"); }
+        });
+        onboard.addView(hint("→ 구글 로그인 → 'API 키 만들기(Create API key)' → 만들어진 키 옆 복사 버튼"));
+        wideBtn(onboard, "② 복사한 키 붙여넣기").setOnClickListener(v -> {
+            pasteSettings();
+            if (!core.key().isEmpty()) { onboard.setVisibility(View.GONE); testKey(); showTab(3); }
+        });
+        wideBtn(onboard, "③ 안경 대기 켜기").setOnClickListener(v -> { if (!GlassesService.running) toggleService(); });
+        onboard.addView(hint("안경은 먼저 휴대폰 블루투스(또는 제조사 앱)로 연결해 두세요."));
+
         LinearLayout st = card(col);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -361,12 +381,16 @@ public class MainActivity extends Activity implements AppCore.Ui {
         paidBox = sw(s1, "💳 결제한 키 사용 중 (통역·대답 더 빠르게)", "paidKey", false);
 
         // 2. 안경
-        LinearLayout s2 = fold(col, "👓 안경 · 카메라 연결", false);
-        s2.addView(label("사진 찍는 카메라"));
+        LinearLayout s2 = fold(col, BuildConfig.FULL ? "👓 안경 · 카메라 연결" : "👓 안경 연결", false);
+        LinearLayout camBox = new LinearLayout(this);
+        camBox.setOrientation(LinearLayout.VERTICAL);
+        s2.addView(camBox);
+        camBox.addView(label("사진 찍는 카메라"));
         String[] cams = {"👓 안경 카메라", "🔌 USB 카메라 (내시경·웹캠)"};
-        camChips = new Chips(s2, cams, 2, i -> core.prefs.edit().putString("camSource", i == 1 ? "USB" : "안경").apply());
-        s2.addView(hint("USB 카메라: 휴대폰에 꽂고 아래 '시험 촬영'을 한 번 눌러 허용해 주세요. 버튼·호출어·블루투스 이어폰 버튼으로 찍을 수 있어요."));
-        wideBtn(s2, "📷 USB 카메라 시험 촬영").setOnClickListener(v -> testUsbCam());
+        camChips = new Chips(camBox, cams, 2, i -> core.prefs.edit().putString("camSource", i == 1 ? "USB" : "안경").apply());
+        camBox.addView(hint("USB 카메라: 휴대폰에 꽂고 아래 '시험 촬영'을 한 번 눌러 허용해 주세요. 버튼·호출어·블루투스 이어폰 버튼으로 찍을 수 있어요."));
+        wideBtn(camBox, "📷 USB 카메라 시험 촬영").setOnClickListener(v -> testUsbCam());
+        if (!BuildConfig.FULL) camBox.setVisibility(View.GONE);
         s2.addView(label("안경"));
         s2.addView(hint("페어링된 S1Pro / M88 중에서 고르세요."));
         glassesGroup = new RadioGroup(this);
@@ -430,6 +454,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
         // 7. 드라이브
         LinearLayout s7 = fold(col, "📤 드라이브 업로드 (블로그·쇼츠용)", false);
+        if (!BuildConfig.FULL) ((View) s7.getParent()).setVisibility(View.GONE);
         s7.addView(hint("찍은 사진·AI 설명·일기·회의 요약을 드라이브 '안경 촬영/날짜' 폴더에 올려요."));
         uploadBox = sw(s7, "자동으로 드라이브에 올리기", "autoUpload", true);
         s7.addView(label("업로드 주소 (앱스 스크립트 웹 앱 URL)"));
@@ -454,6 +479,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
         // 7-1. 반지 리모컨
         LinearLayout sr = fold(col, "🎮 블루투스 리모컨 (반지)", false);
+        if (!BuildConfig.FULL) ((View) sr.getParent()).setVisibility(View.GONE);
         sr.addView(hint("① 리모컨을 휴대폰과 블루투스로 연결하세요.\n② 아래 '접근성에서 켜기' → '쟁부리 리모컨'을 켜세요 (화면이 꺼져도 버튼을 받아요).\n③ 버튼마다 '배우기'를 누르고 리모컨 버튼을 한 번 누르세요.\n④ 오른쪽 동작을 눌러 원하는 기능을 고르세요."));
         remoteStatus = text("", 14, TXT, true);
         remoteStatus.setPadding(0, dp(8), 0, 0);
@@ -801,6 +827,20 @@ public class MainActivity extends Activity implements AppCore.Ui {
         }).start();
     }
 
+    /** 공유용: 처음 한 번 안내 */
+    private void showAgreement() {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("쟁부리 AI 안경 — 처음 안내")
+                .setMessage("• 이 앱은 안경 제조사의 공식 앱이 아니라, 개인이 만든 무료 비공식 앱이에요.\n\n"
+                        + "• 사진과 목소리는 AI 대답을 위해 본인의 구글 제미나이 계정으로만 보내져요. 다른 서버로는 보내지 않아요.\n\n"
+                        + "• AI 대답은 틀릴 수 있어요. 약·돈·건강·법률처럼 중요한 내용은 꼭 따로 확인하세요.\n\n"
+                        + "• 무료 키는 사용 한도가 있어서 많이 쓰면 잠깐 멈출 수 있어요.\n\n"
+                        + "• 안경 펌웨어가 바뀌면 동작하지 않을 수 있고, 사용에 대한 책임은 본인에게 있어요.")
+                .setCancelable(false)
+                .setPositiveButton("확인하고 시작", (d, w) -> core.prefs.edit().putBoolean("agreed", true).apply())
+                .show();
+    }
+
     private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
 
     private String versionName() {
@@ -1055,7 +1095,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         List<String> need = new ArrayList<>();
         need.add(Manifest.permission.ACCESS_FINE_LOCATION);
         need.add(Manifest.permission.RECORD_AUDIO);
-        need.add(Manifest.permission.CAMERA);
+        if (BuildConfig.FULL) need.add(Manifest.permission.CAMERA);
         if (Build.VERSION.SDK_INT >= 31) {
             need.add(Manifest.permission.BLUETOOTH_CONNECT);
             need.add(Manifest.permission.BLUETOOTH_SCAN);

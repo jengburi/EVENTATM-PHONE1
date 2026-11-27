@@ -6,8 +6,8 @@ android {
         applicationId 'com.jengburi.glassesai'
         minSdk 29
         targetSdk 34
-        versionCode 47
-        versionName '3.2.2'
+        versionCode 48
+        versionName '3.3.0'
     }
     signingConfigs {
         fixedDebug {
@@ -22,10 +22,18 @@ android {
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         signingConfig signingConfigs.fixedDebug
     } }
+    buildFeatures { buildConfig true }
+    flavorDimensions 'edition'
+    productFlavors {
+        // 내 폰용: 모든 기능 (리모컨, USB 카메라, 드라이브 업로드)
+        full { dimension 'edition'; buildConfigField 'boolean', 'FULL', 'true' }
+        // M88 구매자 공유용: 리모컨·USB 카메라·드라이브 업로드 빼고, 처음 안내 화면 추가
+        share { dimension 'edition'; buildConfigField 'boolean', 'FULL', 'false'; versionNameSuffix '-share' }
+    }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'com.herohan:UVCAndroid:1.0.13'
+    fullImplementation 'com.herohan:UVCAndroid:1.0.13'
 }

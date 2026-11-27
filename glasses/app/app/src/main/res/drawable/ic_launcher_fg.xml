@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 주황색 AI 안경 + 반짝이 (108dp 캔버스, 가운데 66dp 안전 영역) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 왼쪽 렌즈 -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFB020" android:strokeWidth="5"
+        android:pathData="M30,50 h18 a5,5 0 0 1 5,5 v6 a10,10 0 0 1 -10,10 h-8 a10,10 0 0 1 -10,-10 v-6 a5,5 0 0 1 5,-5 z" />
+    <!-- 오른쪽 렌즈 -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFB020" android:strokeWidth="5"
+        android:pathData="M60,50 h18 a5,5 0 0 1 5,5 v6 a10,10 0 0 1 -10,10 h-8 a10,10 0 0 1 -10,-10 v-6 a5,5 0 0 1 5,-5 z" />
+    <!-- 코 다리 -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFB020" android:strokeWidth="5"
+        android:strokeLineCap="round" android:pathData="M50,55 q4,-4 8,0" />
+    <!-- 렌즈 속 반사광 -->
+    <path android:fillColor="#66FFFFFF" android:pathData="M31,56 h6 l-4,9 h-4 z" />
+    <path android:fillColor="#66FFFFFF" android:pathData="M61,56 h6 l-4,9 h-4 z" />
+    <!-- AI 반짝이 -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M74,26 q1.6,6.4 8,8 q-6.4,1.6 -8,8 q-1.6,-6.4 -8,-8 q6.4,-1.6 8,-8 z" />
+    <path android:fillColor="#FFFFD27A"
+        android:pathData="M63,33 q0.8,3.2 4,4 q-3.2,0.8 -4,4 q-0.8,-3.2 -4,-4 q3.2,-0.8 4,-4 z" />
+</vector>
