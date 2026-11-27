@@ -323,7 +323,7 @@ public class AppCore {
 
     /** "번역", "1", "다시듣기", "말로만" 같은 이름을 동작 번호로. */
     /** 버튼·화면 카드로 바로 실행하는 재미 기능 */
-    public static final String[] FEATURE_KEYS = {"주차", "내차", "위치", "일기", "팩트", "회의", "길안내", "영상", "사진만"};
+    public static final String[] FEATURE_KEYS = {"주차", "내차", "위치", "일기", "팩트", "회의", "길안내", "영상가져오기", "영상", "사진만"};
 
     static int parseAction(String s) {
         s = s.trim();
@@ -394,6 +394,7 @@ public class AppCore {
             case "회의": if (features.meetingOn) features.stopMeeting(); else features.startMeeting(); break;
             case "길안내": runTask("길안내", this::navAsk, false); break;
             case "영상": toggleVideo(); break;
+            case "영상가져오기": runTask("영상 가져오기", features::fetchVideo, false); break;
             case "사진만": runTask("사진 찍기", features::photoOnly, false); break;
         }
     }
@@ -494,7 +495,7 @@ public class AppCore {
             + "길안내를 원하면(예: 서울역 가는 길 알려 줘) [길안내:목적지:도보] 처럼 답해. 방법은 도보, 자동차, 대중교통 중 하나(운전·차 얘기면 자동차, 모르면 도보).\n"
             + "지금 내 위치를 물으면 [위치], 근처 장소를 찾으면(예: 근처 편의점 어디야) [주변:편의점].\n"
             + "주차했다고 하거나 주차 위치 기억해 달라고 하면 [주차], 내 차 어디 있냐고 하면 [내차].\n"
-            + "영상(동영상) 찍어 달라거나 녹화 시작이면 [영상시작], 녹화 그만·영상 끝이면 [영상끝]. 설명 없이 사진만 찍어 두라고 하면 [사진저장].\n"
+            + "영상(동영상) 찍어 달라거나 녹화 시작이면 [영상시작], 녹화 그만·영상 끝이면 [영상끝]. 설명 없이 사진만 찍어 두라고 하면 [사진저장]. 안경 영상을 휴대폰으로 가져오라고 하면 [영상가져오기].\n"
             + "오늘 일기를 써 달라고 하면 [일기]. TV나 들리는 말이 사실인지 확인해 달라고 하면 [팩트체크]. 회의 기록이나 회의 녹음을 시작해 달라고 하면 [회의].\n"
             + "위 대괄호 신호로 답할 때는 다른 말 없이 신호만 써.\n"
             + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
@@ -621,6 +622,7 @@ public class AppCore {
             return wantStart ? "녹화를 시작할게요" : "녹화를 끝낼게요";
         }
         if (a.contains("[사진저장]")) return features.photoOnly();
+        if (a.contains("[영상가져오기]")) return features.fetchVideo();
         return null;
     }
 

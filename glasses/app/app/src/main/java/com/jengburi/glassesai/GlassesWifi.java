@@ -134,6 +134,19 @@ public class GlassesWifi {
         return out;
     }
 
+    /** S1Pro: 가장 최근 동영상 이름 */
+    public String latestVideo() throws Exception {
+        String best = null, bestTime = "";
+        for (String[] f : listAll()) {
+            String l = f[0].toLowerCase();
+            if (!(l.endsWith(".mp4") || l.endsWith(".mov") || l.endsWith(".avi"))) continue;
+            String t = f[2].isEmpty() ? f[0] : f[2];
+            if (t.compareTo(bestTime) >= 0) { bestTime = t; best = f[0]; }
+        }
+        log.log(best != null ? "최근 영상: " + best : "안경에 영상이 없어요");
+        return best;
+    }
+
     /** 큰 파일은 메모리 대신 파일로 저장 */
     public void downloadTo(String name, java.io.File dst) throws Exception {
         HttpURLConnection c = (HttpURLConnection) network.openConnection(new URL(BASE + name));

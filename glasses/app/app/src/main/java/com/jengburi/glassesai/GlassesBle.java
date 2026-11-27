@@ -235,14 +235,14 @@ public class GlassesBle {
 
     /** 안경으로 영상 녹화 시작 (현재 M88만) */
     public void startVideo() throws Exception {
-        if (!jianyun) throw new Exception("S1Pro 영상 찍기 신호는 아직 분석 전이에요 (M88만 돼요)");
-        send(jyPacket(0x0a, 0x03));
+        if (jianyun) send(jyPacket(0x0a, 0x03));
+        else { send(packet(0x22, 0x31)); log.log("S1Pro 영상 시작 신호 (실험) 보냄 → 안경에서 녹화 소리·불빛이 나는지 확인해 주세요"); }
         recording = true;
     }
 
     public void stopVideo() throws Exception {
-        if (!jianyun) throw new Exception("S1Pro 영상 찍기는 아직 지원하지 않아요");
-        send(jyPacket(0x0a, 0x04));
+        if (jianyun) send(jyPacket(0x0a, 0x04));
+        else { send(packet(0x22, 0x31)); log.log("S1Pro 영상 끝 신호 (실험) 보냄"); }
         recording = false;
     }
 

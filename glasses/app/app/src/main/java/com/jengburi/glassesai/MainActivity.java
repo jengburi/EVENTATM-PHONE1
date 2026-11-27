@@ -276,7 +276,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         feat(r3, "🕵", "팩트 체크", "\"방금 그 말 사실이야?\"", RED, () -> core.feature("팩트"));
         LinearLayout r3b = gridRow(col);
         feat(r3b, "🔬", "AI 현미경", "\"이거 무슨 나무야?\" (내시경)", GREEN, () -> core.trigger("기능 카드", AppCore.M_MICRO));
-        r3b.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        feat(r3b, "📥", "영상 가져오기", "\"안경 영상 가져와\"", BLUE, () -> core.feature("영상가져오기"));
 
         col.addView(groupTitle("🗺 이동"));
         LinearLayout r4 = gridRow(col);

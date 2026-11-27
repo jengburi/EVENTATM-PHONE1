@@ -220,25 +220,26 @@ public class Features {
 
     /** 안경에서 가장 최근 영상을 받아 휴대폰 갤러리(Movies/GlassesAI)에 저장 */
     String fetchVideo() throws Exception {
-        if (!core.ble.jianyun) return "이 안경은 아직 영상 가져오기를 지원하지 않아요";
         core.ble.connect();
+        boolean jy = core.ble.jianyun;
         String ssid = core.ble.wifiOn();
         java.io.File tmp = new java.io.File(core.ctx.getCacheDir(), "glasses_video.mp4");
         String name;
         try {
             Thread.sleep(1500);
             core.wifi.connect(ssid);
-            name = core.wifi.latestVideoFtp();
+            name = jy ? core.wifi.latestVideoFtp() : core.wifi.latestVideo();
             if (name == null) return "안경에서 영상을 찾지 못했어요";
             core.log("영상 받는 중… (길면 시간이 걸려요)");
-            core.wifi.downloadFtpTo(name, tmp);
+            if (jy) core.wifi.downloadFtpTo(name, tmp); else core.wifi.downloadTo(name, tmp);
         } finally {
             core.wifi.disconnect();
             core.ble.transferEnd();
         }
         long kb = tmp.length() / 1024;
         android.content.ContentValues v = new android.content.ContentValues();
-        v.put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "glasses_" + name);
+        String fname = name.contains("/") ? name.substring(name.lastIndexOf('/') + 1) : name;
+        v.put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "glasses_" + fname);
         v.put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4");
         v.put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/GlassesAI");
         android.net.Uri u = core.ctx.getContentResolver().insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v);
@@ -254,7 +255,7 @@ public class Features {
                 core.wifi.waitForInternet(30);
                 byte[] all = java.nio.file.Files.readAllBytes(tmp.toPath());
                 Uploader.upload(core.prefs.getString("uploadUrl", "").trim(), core.prefs.getString("uploadKey", "").trim(),
-                        "glasses_" + name, "video/mp4", all, null);
+                        "glasses_" + fname, "video/mp4", all, null);
                 core.log("드라이브에 영상 올림");
             } catch (Exception e) { core.log("영상 드라이브 업로드 실패: " + e.getMessage()); }
         }
