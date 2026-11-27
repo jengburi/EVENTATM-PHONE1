@@ -33,7 +33,25 @@ public class GlassesWifi {
         cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 
+    /** 휴대폰이 이미 이 와이파이에 붙어 있으면 그 네트워크를 돌려줌 */
+    @SuppressWarnings("deprecation")
+    private Network findConnected(String ssid) {
+        try {
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiInfo wi = wm.getConnectionInfo();
+            String cur = wi == null ? null : wi.getSSID();
+            if (cur == null || !cur.replace("\"", "").equals(ssid)) return null;
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+                if (nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return n;
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
     public void connect(String ssid) throws Exception {
+        Network already = findConnected(ssid);
+        if (already != null) { network = already; log.log("이미 " + ssid + " 에 연결돼 있어요"); return; }
         WifiNetworkSpecifier spec = new WifiNetworkSpecifier.Builder()
                 .setSsid(ssid).setWpa2Passphrase(PASSWORD).build();
         NetworkRequest req = new NetworkRequest.Builder()
@@ -48,11 +66,25 @@ public class GlassesWifi {
         };
         log.log("안경 와이파이 연결 중… (처음엔 '연결 허용' 창이 떠요)");
         log.log("연결 창이 뜨면 목록에 " + ssid + " 가 나타날 때까지 기다렸다가 '연결'을 눌러 주세요");
+        long t0 = System.currentTimeMillis();
         cm.requestNetwork(req, cb, 90000);
-        if (!ok.await(95, TimeUnit.SECONDS) || network == null)
-            throw new Exception(err[0] != null ? err[0] : "안경 와이파이 연결 시간 초과");
-        log.log("안경 와이파이 연결 완료");
+        ok.await(95, TimeUnit.SECONDS);
+        if (network != null) { log.log("안경 와이파이 연결 완료"); return; }
+        log.log("연결 창 방식 실패 (" + ((System.currentTimeMillis() - t0) / 1000) + "초): " + (err[0] == null ? "시간 초과" : err[0]));
+        try { cm.unregisterNetworkCallback(cb); } catch (Exception ignored) { }
+        cb = null;
+        // 대신: 사용자가 설정에서 직접 연결하면 그 네트워크를 사용
+        log.log("👉 설정 → Wi-Fi 에서 " + ssid + " 를 눌러 직접 연결해 주세요 (비밀번호 " + PASSWORD + "). 45초 기다릴게요");
+        long end = System.currentTimeMillis() + 45000;
+        while (System.currentTimeMillis() < end) {
+            Network n = findConnected(ssid);
+            if (n != null) { network = n; log.log("직접 연결 확인됨: " + ssid); return; }
+            Thread.sleep(1000);
+        }
+        throw new Exception(err[0] != null ? err[0] : "안경 와이파이 연결 시간 초과");
     }
+
+    public boolean usingOwnRequest() { return cb != null; }
 
     private byte[] get(String path, int timeoutMs) throws Exception {
         HttpURLConnection c = (HttpURLConnection) network.openConnection(new URL(BASE + path));
