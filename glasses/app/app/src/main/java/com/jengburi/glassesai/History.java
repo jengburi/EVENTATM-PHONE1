@@ -32,6 +32,8 @@ public class History {
     }
 
     public static void save(Context c, byte[] jpeg, String mode, String question, String answer, boolean toGallery) {
+        // 사진이 있는 순간은 드라이브에도 (블로그/쇼츠용)
+        if (jpeg != null) { try { AppCore.get(c).uploadMoment(jpeg, mode, question, answer); } catch (Exception ignored) { } }
         try {
             String id = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date());
             File d = dir(c);

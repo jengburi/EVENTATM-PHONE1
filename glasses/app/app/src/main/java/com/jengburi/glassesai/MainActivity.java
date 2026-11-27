@@ -32,6 +32,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
     private Button convoBtn, listenBtn;
+    private EditText uploadUrlEdit, uploadKeyEdit;
+    private CheckBox uploadBox;
     private RadioGroup glassesGroup;
     private final java.util.List<String[]> glassesList = new java.util.ArrayList<>();
     private RadioGroup langGroup;
@@ -178,6 +180,35 @@ public class MainActivity extends Activity implements AppCore.Ui {
         rateGroup.setOnCheckedChangeListener((g, id) -> core.prefs.edit().putFloat("rate", RATES[id - 2000]).apply());
         col.addView(rateGroup);
 
+        // --- 드라이브 업로드 ---
+        col.addView(section("📤 블로그·쇼츠용 드라이브 업로드"));
+        TextView uh = label("찍은 사진과 AI 설명을 드라이브 '안경 촬영/날짜' 폴더에 자동으로 올려요. Claude에게 \"오늘 안경 사진으로 블로그랑 쇼츠 만들어 줘\"라고 하면 돼요.");
+        uh.setTextColor(Color.GRAY);
+        col.addView(uh);
+        uploadBox = check(col, "찍을 때마다 자동으로 드라이브에 올리기", "autoUpload", true);
+        col.addView(label("드라이브 업로드 주소 (앱스 스크립트 웹 앱 URL)"));
+        uploadUrlEdit = edit(col);
+        col.addView(label("비밀 코드"));
+        uploadKeyEdit = edit(col);
+        LinearLayout urow = new LinearLayout(this);
+        col.addView(urow);
+        Button testBtn = rowButton(urow, "연결 테스트");
+        testBtn.setOnClickListener(v -> {
+            saveFields();
+            String url = uploadUrlEdit.getText().toString().trim();
+            String key = uploadKeyEdit.getText().toString().trim();
+            answer.setText("업로드 테스트 중…");
+            new Thread(() -> {
+                String msg;
+                try { Uploader.upload(url, key, "연결테스트.txt", null, null, "안경 AI 앱 연결 테스트 성공"); msg = "✅ 드라이브 '안경 촬영' 폴더에 테스트 파일을 올렸어요!"; }
+                catch (Exception e) { msg = "❌ " + e.getMessage(); }
+                String m = msg;
+                runOnUiThread(() -> answer.setText(m));
+            }).start();
+        });
+        Button syncBtn = rowButton(urow, "안경 속 파일 전부 올리기");
+        syncBtn.setOnClickListener(v -> { saveFields(); core.syncAllToDrive(); });
+
         // --- 안경 고르기 ---
         col.addView(section("👓 안경 고르기 (S1Pro, M88 등)"));
         TextView gh = label("휴대폰과 블루투스로 페어링된 기기 목록이에요. 쓰실 안경을 고르세요.");
@@ -284,6 +315,9 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
     private void loadFields() {
         keyEdit.setText(core.prefs.getString("key", ""));
+        uploadUrlEdit.setText(core.prefs.getString("uploadUrl", ""));
+        uploadKeyEdit.setText(core.prefs.getString("uploadKey", ""));
+        loadCheck(uploadBox);
         modelEdit.setText(core.models());
         promptEdit.setText(core.prefs.getString("customPrompt", AppCore.MODE_PROMPTS[0]));
         triggerEdit.setText(core.triggerCodes());
@@ -306,6 +340,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private void saveFields() {
         core.prefs.edit()
                 .putString("key", keyEdit.getText().toString().trim())
+                .putString("uploadUrl", uploadUrlEdit.getText().toString().trim())
+                .putString("uploadKey", uploadKeyEdit.getText().toString().trim())
                 .putString("model", modelEdit.getText().toString().trim())
                 .putString("customPrompt", promptEdit.getText().toString().trim())
                 .putString("triggers", triggerEdit.getText().toString().trim())

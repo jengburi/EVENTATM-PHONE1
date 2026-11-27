@@ -86,6 +86,32 @@ public class GlassesWifi {
         return best;
     }
 
+    /** 안경에 있는 모든 파일 (이름, 크기) — 사진·동영상·녹음 */
+    public java.util.List<String[]> listAll() throws Exception {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        JSONObject root = new JSONObject(new String(get("app/getfilelist", 10000), "UTF-8"));
+        JSONArray info = root.optJSONArray("info");
+        if (info != null) for (int i = 0; i < info.length(); i++) {
+            JSONArray files = info.getJSONObject(i).optJSONArray("files");
+            if (files == null) continue;
+            for (int j = 0; j < files.length(); j++) {
+                JSONObject f = files.getJSONObject(j);
+                out.add(new String[]{f.optString("name"), String.valueOf(f.optLong("size")), f.optString("createtimestr")});
+            }
+        }
+        return out;
+    }
+
+    /** 큰 파일은 메모리 대신 파일로 저장 */
+    public void downloadTo(String name, java.io.File dst) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) network.openConnection(new URL(BASE + name));
+        c.setConnectTimeout(15000); c.setReadTimeout(60000);
+        try (InputStream in = c.getInputStream(); java.io.FileOutputStream o = new java.io.FileOutputStream(dst)) {
+            byte[] buf = new byte[65536]; int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+        } finally { c.disconnect(); }
+    }
+
     public byte[] download(String name) throws Exception {
         byte[] b = get(name, 20000);
         log.log("사진 받음 (" + (b.length / 1024) + "KB)");

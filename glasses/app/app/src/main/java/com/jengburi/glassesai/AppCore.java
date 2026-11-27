@@ -69,6 +69,88 @@ public class AppCore {
         ble.preferredAddress = prefs.getString("glassesAddr", "");
     }
 
+    // ---------- 드라이브 업로드 (블로그/쇼츠용) ----------
+    private final java.util.concurrent.ExecutorService uploadPool = java.util.concurrent.Executors.newSingleThreadExecutor();
+    public boolean uploadReady() {
+        return prefs.getBoolean("autoUpload", true) && !prefs.getString("uploadUrl", "").trim().isEmpty();
+    }
+
+    /** 찍은 사진 + AI 설명을 드라이브에 올림 (뒤에서 차례로). */
+    public void uploadMoment(byte[] jpeg, String mode, String q, String a) {
+        if (!uploadReady()) return;
+        String stamp = new java.text.SimpleDateFormat("HHmmss", Locale.KOREA).format(new java.util.Date());
+        uploadPool.submit(() -> {
+            try {
+                wifi.waitForInternet(30);
+                String url = prefs.getString("uploadUrl", "").trim(), key = prefs.getString("uploadKey", "").trim();
+                if (jpeg != null) Uploader.upload(url, key, "glasses_" + stamp + ".jpg", "image/jpeg", jpeg, null);
+                if (a != null && !a.isEmpty()) {
+                    String note = "시각: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA).format(new java.util.Date())
+                            + "\n모드: " + mode + (q != null ? "\n질문: " + q : "") + "\nAI 설명: " + a + "\n";
+                    Uploader.upload(url, key, "glasses_" + stamp + ".txt", null, null, note);
+                }
+                log("드라이브에 올림 (안경 촬영/오늘 날짜)");
+            } catch (Exception e) { log("드라이브 업로드 실패: " + e.getMessage()); }
+        });
+    }
+
+    /** 안경 속 사진·동영상을 모두 가져와 드라이브에 올림 (이미 올린 건 건너뜀). */
+    public synchronized void syncAllToDrive() {
+        if (busy) return;
+        if (!uploadReady()) { say("먼저 드라이브 업로드 주소를 설정해 주세요"); return; }
+        setBusy(true);
+        new Thread(() -> {
+            java.util.List<java.io.File> got = new java.util.ArrayList<>();
+            java.util.List<String> names = new java.util.ArrayList<>();
+            java.util.Set<String> done = new java.util.HashSet<>(prefs.getStringSet("uploadedNames", new java.util.HashSet<>()));
+            try {
+                answer("안경 속 파일 가져오는 중…");
+                ble.connect();
+                String ssid = ble.wifiOn();
+                try {
+                    Thread.sleep(1500);
+                    wifi.connect(ssid);
+                    for (String[] f : wifi.listAll()) {
+                        String name = f[0];
+                        long size = 0; try { size = Long.parseLong(f[1]); } catch (Exception ignored) { }
+                        if (done.contains(name)) continue;
+                        // 크기 단위가 KB 로 오는 경우가 많음 → 30MB 넘는 건 건너뜀
+                        if (size > 30 * 1024) { log("너무 커서 건너뜀: " + name); continue; }
+                        java.io.File dst = new java.io.File(ctx.getCacheDir(), name.replace('/', '_'));
+                        log("가져오는 중: " + name);
+                        wifi.downloadTo(name, dst);
+                        if (dst.length() > 30L * 1024 * 1024) { dst.delete(); log("너무 커서 건너뜀: " + name); continue; }
+                        got.add(dst); names.add(name);
+                    }
+                } finally {
+                    wifi.disconnect();
+                    ble.transferEnd();
+                }
+                if (got.isEmpty()) { answer("새로 올릴 파일이 없어요"); say("새로 올릴 파일이 없어요"); return; }
+                wifi.waitForInternet(30);
+                String url = prefs.getString("uploadUrl", "").trim(), key = prefs.getString("uploadKey", "").trim();
+                int ok = 0;
+                for (int i = 0; i < got.size(); i++) {
+                    java.io.File f = got.get(i);
+                    String n = f.getName().toLowerCase();
+                    String mime = n.endsWith(".jpg") ? "image/jpeg" : n.endsWith(".mp4") ? "video/mp4"
+                            : (n.endsWith(".aac") || n.endsWith(".m4a")) ? "audio/aac" : "application/octet-stream";
+                    try {
+                        byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
+                        Uploader.upload(url, key, f.getName(), mime, b, null);
+                        done.add(names.get(i)); ok++;
+                        log("드라이브에 올림: " + f.getName());
+                    } catch (Exception e) { log("올리기 실패 " + f.getName() + ": " + e.getMessage()); }
+                    f.delete();
+                }
+                prefs.edit().putStringSet("uploadedNames", done).apply();
+                answer(ok + "개 파일을 드라이브 '안경 촬영' 폴더에 올렸어요");
+                say(ok + "개를 드라이브에 올렸어요");
+            } catch (Exception e) { fail(e); }
+            finally { for (java.io.File f : got) f.delete(); setBusy(false); }
+        }).start();
+    }
+
     /** 사용할 안경 바꾸기 (빈 문자열 = 자동) */
     public void selectGlasses(String addr, String name) {
         prefs.edit().putString("glassesAddr", addr).putString("glassesName", name).apply();
