@@ -150,6 +150,9 @@ public class UsbCam {
         final String[] err = {null};
         final UVCCamera[] cam = {null};
         final SurfaceTexture[] tex = {null};
+        final android.media.ImageReader[] sink = {null};
+        final byte[][] latest = {null};
+        final int[] dims = {640, 480};
         final USBMonitor[] mon = {null};
 
         USBMonitor.OnDeviceConnectListener l = new USBMonitor.OnDeviceConnectListener() {
@@ -166,7 +169,9 @@ public class UsbCam {
                             try { block.claimInterface(it, true); block.releaseInterface(it); } catch (Exception ignored) { }
                         }
                     }
-                    UVCCamera c = new UVCCamera(new UVCParam());
+                    UVCParam prm = new UVCParam();
+                    try { prm.setQuirks(UVCCamera.getRecommendedPlatformQuirks()); } catch (Throwable ignored) { }
+                    UVCCamera c = new UVCCamera(prm);
                     cam[0] = c;
                     int r = c.open(block);
                     if (r != 0) throw new Exception(r == -6 ? "다른 앱이 USB 카메라를 쓰고 있어요. 웹캠 앱을 완전히 끄고 카메라를 뺐다 다시 꽂아 주세요" : "카메라 열기 실패 (" + r + ")");
@@ -181,20 +186,34 @@ public class UsbCam {
                     }
                     Size ps = c.getPreviewSize();
                     final int w = ps != null ? ps.width : 640, hgt = ps != null ? ps.height : 480;
-                    log.log("USB 카메라: " + w + "×" + hgt);
-                    tex[0] = new SurfaceTexture(0);
-                    tex[0].setDefaultBufferSize(w, hgt);
-                    c.setPreviewTexture(tex[0]);
+                    dims[0] = w; dims[1] = hgt;
+                    log.log("USB 카메라: " + w + "×" + hgt + (small ? " (작게)" : ""));
+                    // 화면 대신 영상을 받아서 바로 버려 주는 곳 (안 그러면 몇 장 뒤 멈춤)
+                    try {
+                        sink[0] = android.media.ImageReader.newInstance(w, hgt, android.graphics.PixelFormat.RGBA_8888, 3);
+                        sink[0].setOnImageAvailableListener(r -> {
+                            try { android.media.Image im = r.acquireLatestImage(); if (im != null) im.close(); } catch (Throwable ignored) { }
+                        }, h);
+                        c.setPreviewDisplay(sink[0].getSurface());
+                    } catch (Throwable t) {
+                        tex[0] = new SurfaceTexture(0);
+                        tex[0].setDefaultBufferSize(w, hgt);
+                        c.setPreviewTexture(tex[0]);
+                    }
                     final int[] n = {0};
                     c.setFrameCallback(new IFrameCallback() {
                         @Override public void onFrame(ByteBuffer frame) {
-                            if (out[0] != null || ++n[0] < 12) return; // 밝기 맞출 시간
+                            if (out[0] != null) return;
+                            byte[] nv21 = new byte[frame.remaining()];
+                            frame.get(nv21);
+                            latest[0] = nv21;
+                            fixDims(dims, nv21.length);
+                            if (++n[0] == 1) log.log("USB 카메라 영상 들어옴");
+                            if (n[0] < 10) return; // 밝기 맞출 시간
                             try {
-                                byte[] nv21 = new byte[frame.remaining()];
-                                frame.get(nv21);
-                                YuvImage y = new YuvImage(nv21, ImageFormat.NV21, w, hgt, null);
+                                YuvImage y = new YuvImage(nv21, ImageFormat.NV21, dims[0], dims[1], null);
                                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                                y.compressToJpeg(new Rect(0, 0, w, hgt), 90, bo);
+                                y.compressToJpeg(new Rect(0, 0, dims[0], dims[1]), 90, bo);
                                 out[0] = bo.toByteArray();
                             } catch (Exception e) { err[0] = "사진 변환 실패: " + e.getMessage(); }
                             done.countDown();
@@ -216,7 +235,16 @@ public class UsbCam {
                     mon[0].requestPermission(dev);
                 } catch (Exception e) { err[0] = e.getMessage(); done.countDown(); }
             });
-            if (!done.await(15, TimeUnit.SECONDS)) throw new Exception("USB 카메라에서 사진이 오지 않아요 (시간 초과)");
+            if (!done.await(8, TimeUnit.SECONDS)) {
+                // 몇 장 받다가 멈췄으면 마지막으로 받은 장면을 사진으로
+                byte[] last = latest[0];
+                if (last == null) throw new Exception("USB 카메라에서 영상이 하나도 오지 않아요 (시간 초과)");
+                YuvImage y = new YuvImage(last, ImageFormat.NV21, dims[0], dims[1], null);
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                y.compressToJpeg(new Rect(0, 0, dims[0], dims[1]), 90, bo);
+                log.log("USB 카메라: 마지막으로 받은 장면을 사용");
+                return bo.toByteArray();
+            }
             if (out[0] == null) throw new Exception(err[0] != null ? err[0] : "USB 카메라 사진을 못 받았어요");
             return out[0];
         } finally {
@@ -224,12 +252,20 @@ public class UsbCam {
             h.post(() -> {
                 try { if (cam[0] != null) { cam[0].setFrameCallback(null, 0); cam[0].stopPreview(); cam[0].close(); cam[0].destroy(); } } catch (Exception ignored) { }
                 try { if (tex[0] != null) tex[0].release(); } catch (Exception ignored) { }
+                try { if (sink[0] != null) sink[0].close(); } catch (Exception ignored) { }
                 try { if (mon[0] != null) { mon[0].unregister(); mon[0].destroy(); } } catch (Exception ignored) { }
                 closed.countDown();
             });
             closed.await(3, TimeUnit.SECONDS);
             ht.quitSafely();
         }
+    }
+
+    /** 실제로 들어온 영상 크기에 맞추기 (NV21 = 가로×세로×1.5) */
+    static void fixDims(int[] d, int len) {
+        if (d[0] * d[1] * 3 / 2 == len) return;
+        int[][] c = {{1920, 1080}, {1280, 720}, {1280, 960}, {1024, 768}, {800, 600}, {640, 480}, {640, 360}, {352, 288}, {320, 240}, {2560, 1440}};
+        for (int[] x : c) if (x[0] * x[1] * 3 / 2 == len) { d[0] = x[0]; d[1] = x[1]; return; }
     }
 
     /** 1280×720 이하에서 가장 큰 크기 (MJPEG 우선) */
