@@ -143,12 +143,28 @@ public class Interpreter {
     /** 기존 방식: 짧은 조각으로 잘라 최대 3개를 동시에 번역하고, 순서대로 읽기. */
     private String chunkLoop(boolean summary, boolean glassesMic) throws Exception {
         final long[] lastVoice = {System.currentTimeMillis()};
-        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
         final java.util.concurrent.ConcurrentHashMap<Integer, String> results = new java.util.concurrent.ConcurrentHashMap<>();
         final int[] nextIn = {0};
         final StringBuilder prev = new StringBuilder();
-        Thread rec = new Thread(() -> AudioQ.stream(core.ctx, glassesMic, () -> running, wav -> {
+        final long[] coolUntil = {0};
+        final java.io.ByteArrayOutputStream pending = new java.io.ByteArrayOutputStream();
+        Thread rec = new Thread(() -> AudioQ.stream(core.ctx, glassesMic, () -> running, wav0 -> {
             lastVoice[0] = System.currentTimeMillis();
+            byte[] wav;
+            synchronized (pending) {
+                // 한도에 걸려 쉬는 동안엔 모아 두기
+                if (System.currentTimeMillis() < coolUntil[0]) { pending.write(wav0, 44, wav0.length - 44); return; }
+                if (pending.size() > 0) {
+                    pending.write(wav0, 44, wav0.length - 44);
+                    byte[] all = pending.toByteArray();
+                    pending.reset();
+                    // 너무 길면 뒤쪽 30초만
+                    int max = 16000 * 2 * 30;
+                    if (all.length > max) all = java.util.Arrays.copyOfRange(all, all.length - max, all.length);
+                    wav = AudioQ.wav(all);
+                } else wav = wav0;
+            }
             final int seq;
             synchronized (nextIn) { seq = nextIn[0]++; }
             final String context;
@@ -162,7 +178,14 @@ public class Interpreter {
                         + "말소리가 없거나 음악/잡음뿐이면 none 이라고만 답해.";
                 String t;
                 try { t = core.askModel(prompt, null, wav).trim(); }
-                catch (Exception e) { core.log("이 조각은 건너뜀: " + e.getMessage()); t = ""; }
+                catch (Exception e) {
+                    String m = String.valueOf(e.getMessage());
+                    if (m.contains("429") || m.contains("503") || m.toLowerCase().contains("quota") || m.contains("RESOURCE_EXHAUSTED")) {
+                        coolUntil[0] = System.currentTimeMillis() + 10000;
+                        core.log("무료 사용량 한도/혼잡 → 10초 쉬었다가 모아서 번역할게요");
+                    } else core.log("이 조각은 건너뜀: " + m);
+                    t = "";
+                }
                 results.put(seq, t);
             });
         }, core::log));

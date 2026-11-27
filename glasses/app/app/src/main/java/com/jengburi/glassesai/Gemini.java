@@ -37,7 +37,13 @@ public class Gemini {
                     last = e;
                     String m = String.valueOf(e.getMessage());
                     boolean busy = m.contains(" 503") || m.contains(" 429") || m.contains(" 500") || m.contains("timeout") || m.contains("timed out");
-                    if (!busy || attempt == 2) { log.log(model + " 실패 → 다음 모델"); break; }
+                    if (!busy || attempt == 2) {
+                        java.util.regex.Matcher cm = java.util.regex.Pattern.compile("오류 (\\d{3})").matcher(m);
+                        String code = cm.find() ? cm.group(1) : "";
+                        String why = code.equals("429") ? "무료 한도 초과" : code.equals("503") ? "서버 혼잡" : code.equals("404") ? "없는 모델" : code.isEmpty() ? "응답 없음" : "오류 " + code;
+                        log.log(model + " 실패 (" + why + ") → 다음 모델");
+                        break;
+                    }
                     log.log(model + " 혼잡 → 1.5초 후 한 번 더");
                     Thread.sleep(1500L);
                 }
