@@ -191,8 +191,8 @@ public class UsbCam {
                     // 화면 대신 영상을 받아서 바로 버려 주는 곳 (안 그러면 몇 장 뒤 멈춤)
                     try {
                         sink[0] = android.media.ImageReader.newInstance(w, hgt, android.graphics.PixelFormat.RGBA_8888, 3);
-                        sink[0].setOnImageAvailableListener(r -> {
-                            try { android.media.Image im = r.acquireLatestImage(); if (im != null) im.close(); } catch (Throwable ignored) { }
+                        sink[0].setOnImageAvailableListener(ir -> {
+                            try { android.media.Image im = ir.acquireLatestImage(); if (im != null) im.close(); } catch (Throwable ignored) { }
                         }, h);
                         c.setPreviewDisplay(sink[0].getSurface());
                     } catch (Throwable t) {
