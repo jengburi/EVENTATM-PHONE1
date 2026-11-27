@@ -236,13 +236,13 @@ public class GlassesBle {
     /** 안경으로 영상 녹화 시작 (현재 M88만) */
     public void startVideo() throws Exception {
         if (jianyun) send(jyPacket(0x0a, 0x03));
-        else { send(packet(0x22, 0x31)); log.log("S1Pro 영상 시작 신호 (실험) 보냄 → 안경에서 녹화 소리·불빛이 나는지 확인해 주세요"); }
+        else { send(packet(0x23, 0x00)); log.log("S1Pro 영상 녹화 시작"); } // AB 55 00 03 23 00 23 (버그 리포트로 확인)
         recording = true;
     }
 
     public void stopVideo() throws Exception {
         if (jianyun) send(jyPacket(0x0a, 0x04));
-        else { send(packet(0x22, 0x31)); log.log("S1Pro 영상 끝 신호 (실험) 보냄"); }
+        else { send(packet(0x24, 0x00)); log.log("S1Pro 영상 녹화 끝"); } // AB 55 00 03 24 00 24
         recording = false;
     }
 
