@@ -90,6 +90,7 @@ public class LiveTranslator {
                             .put("model", "models/" + model)
                             .put("generationConfig", new JSONObject().put("responseModalities", new JSONArray().put(audioOut ? "AUDIO" : "TEXT")))
                             .put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", sys))))
+                            .put("outputAudioTranscription", audioOut ? new JSONObject() : null)
                             .put("realtimeInputConfig", new JSONObject()
                                     .put("activityHandling", "NO_INTERRUPTION")
                                     .put("automaticActivityDetection", new JSONObject()
@@ -114,6 +115,7 @@ public class LiveTranslator {
             try { ws.cancel(); } catch (Exception ignored) { }
             return false;
         }
+        readyAt = System.currentTimeMillis();
         core.prefs.edit().putString("liveModel", model).apply();
         core.log("실시간 통역 연결됨 (" + model + ")");
         if (audioOut) startPlayer();
@@ -137,7 +139,17 @@ public class LiveTranslator {
                 AudioQ.applyGain(buf, n, g);
                 double sq = 0; for (int i = 0; i < n; i++) sq += (double) buf[i] * buf[i];
                 msum += Math.sqrt(sq / n);
-                if (++cnt % 20 == 0) { core.log(AudioQ.meter(msum / 20)); msum = 0; }
+                if (++cnt % 10 == 0) {
+                    double lvl = msum / 10; msum = 0;
+                    core.micRms = lvl;
+                    if (lvl > 300) voiceTicks++;
+                    // 말소리는 계속 들어가는데 20초 넘게 번역이 하나도 안 오면 → 기존 방식으로
+                    if (textCount == 0 && voiceTicks >= 12 && System.currentTimeMillis() - readyAt > 20000) {
+                        core.log("실시간 모드에서 번역이 안 와서 기존 방식으로 바꿀게요");
+                        noOutput = true;
+                        break;
+                    }
+                }
                 byte[] pcm = AudioQ.toBytes(buf, n);
                 JSONObject msg = new JSONObject().put("realtimeInput", new JSONObject()
                         .put("audio", new JSONObject()
@@ -146,6 +158,7 @@ public class LiveTranslator {
                 ws.send(msg.toString());
             }
             if (closed && running.get()) core.log("실시간 연결이 끊겼어요 (세션 시간 제한일 수 있어요)");
+            if (closed && running.get() && textCount == 0) noOutput = true;
         } catch (Exception e) {
             core.log("실시간 통역 오류: " + e.getMessage());
         } finally {
@@ -154,13 +167,25 @@ public class LiveTranslator {
             try { ws.close(1000, "bye"); } catch (Exception ignored) { }
             if (player != null) { try { player.stop(); player.release(); } catch (Exception ignored) { } player = null; }
         }
+        if (noOutput) {
+            core.prefs.edit().remove("liveModel").apply(); // 다음엔 다른 실시간 모델을 다시 찾기
+            return false;
+        }
         return true;
     }
+
+    private volatile int textCount, voiceTicks;
+    private volatile long readyAt;
+    private volatile boolean noOutput;
+    private int debugLeft = 3;
 
     private void handle(String text, CountDownLatch setup) {
         try {
             JSONObject j = new JSONObject(text);
             if (j.has("setupComplete")) { ready = true; setup.countDown(); return; }
+            if (j.has("error")) { core.log("실시간 오류: " + j.optJSONObject("error")); return; }
+            if (j.has("goAway")) { core.log("실시간 서버가 곧 연결을 끊는대요"); return; }
+            if (!j.has("serverContent") && debugLeft-- > 0) core.log("실시간 응답: " + text.substring(0, Math.min(120, text.length())));
             JSONObject sc = j.optJSONObject("serverContent");
             if (sc == null) return;
             JSONObject turn = sc.optJSONObject("modelTurn");
@@ -169,16 +194,17 @@ public class LiveTranslator {
                 if (parts != null) for (int i = 0; i < parts.length(); i++) {
                     JSONObject p = parts.getJSONObject(i);
                     String t = p.optString("text", "");
-                    if (!t.isEmpty()) { turnText.append(t); flushSentences(false); }
+                    if (!t.isEmpty()) { textCount++; turnText.append(t); flushSentences(false); }
                     JSONObject inline = p.optJSONObject("inlineData");
                     if (inline != null && player != null) {
                         byte[] pcm = Base64.decode(inline.optString("data"), Base64.DEFAULT);
                         player.write(pcm, 0, pcm.length);
+                        textCount++;
                     }
                 }
             }
             JSONObject outTr = sc.optJSONObject("outputTranscription");
-            if (outTr != null) addShown(outTr.optString("text"));
+            if (outTr != null) { textCount++; addShown(outTr.optString("text")); }
             if (sc.optBoolean("turnComplete")) flushSentences(true);
         } catch (Exception ignored) { }
     }

@@ -78,7 +78,7 @@ public class AudioQ {
                 for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
                 double rms = Math.sqrt(sum / n);
                 meterSum += rms;
-                if (total % 20 == 0) { log.log(meter(meterSum / 20)); meterSum = 0; }
+                if (total % 10 == 0) { try { AppCore.get(ctx).micRms = meterSum / 10; } catch (Exception ignored) { } meterSum = 0; }
                 if (total <= 5) { noise = noise < 0 ? rms : (noise + rms) / 2; continue; }
                 double th = Math.max(noise * 1.6, 180);
                 boolean voice = rms > th;
@@ -176,6 +176,7 @@ public class AudioQ {
                 double sum = 0;
                 for (int i = 0; i < n; i++) sum += (double) buf[i] * buf[i];
                 double rms = Math.sqrt(sum / n);
+                if (total % 5 == 0) { try { AppCore.get(ctx).micRms = rms; } catch (Exception ignored) { } }
                 byte[] bytes = toBytes(buf, n);
                 if (total <= 3) { noise = noise < 0 ? rms : (noise + rms) / 2; pre.write(bytes, 0, bytes.length); continue; }
                 double th = Math.max(noise * 2.0, 250);

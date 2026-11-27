@@ -127,6 +127,7 @@ public class Interpreter {
             if (core.prefs.getBoolean("liveMode", true)) {
                 LiveTranslator lt = new LiveTranslator(core);
                 if (lt.run(() -> running, summary, glassesMic)) { saved = lt.all.toString().trim(); return; }
+                if (!running) return;
             }
             saved = chunkLoop(summary, glassesMic);
         } catch (Exception e) {

@@ -72,6 +72,8 @@ public class AppCore {
     }
 
     public final WakeWord wakeWord;
+    /** 지금 마이크 소리 크기 (화면 표시용) */
+    public volatile double micRms = -1;
 
     /** 호출어가 들렸을 때: 뒤에 질문이 있으면 바로 묻고, 없으면 '삐' 후 듣기 */
     public void wake(String question) {
