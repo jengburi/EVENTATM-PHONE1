@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="remote_desc">블루투스 반지 리모컨 버튼을 받아서 쟁부리 AI 안경 기능(AI 부르기, 통역 등)을 실행해요. 화면 내용은 읽지 않고, 리모컨 버튼 신호만 사용해요.</string>
+</resources>

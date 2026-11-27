@@ -58,7 +58,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private View askBtn, photoBtn, convoBtn, listenBtn, meetBtn, againBtn;
     private TextView convoLabel, listenLabel, meetLabel, serviceBtn, statusConn, statusSub, kcalView;
     private ImageView photo;
-    private TextView answer, logView, keyStatus;
+    private TextView answer, logView, keyStatus, remoteStatus;
+    private final TextView[] slotCode = new TextView[5], slotAct = new TextView[5];
     private LinearLayout historyList;
     private final ScrollView[] pages = new ScrollView[4];
     private final TextView[] tabs = new TextView[4];
@@ -451,6 +452,47 @@ public class MainActivity extends Activity implements AppCore.Ui {
         });
         smallBtn(ur, "안경 파일 전부 올리기").setOnClickListener(v -> { saveFields(); core.syncAllToDrive(); });
 
+        // 7-1. 반지 리모컨
+        LinearLayout sr = fold(col, "🎮 블루투스 리모컨 (반지)", false);
+        sr.addView(hint("① 리모컨을 휴대폰과 블루투스로 연결하세요.\n② 아래 '접근성에서 켜기' → '쟁부리 리모컨'을 켜세요 (화면이 꺼져도 버튼을 받아요).\n③ 버튼마다 '배우기'를 누르고 리모컨 버튼을 한 번 누르세요.\n④ 오른쪽 동작을 눌러 원하는 기능을 고르세요."));
+        remoteStatus = text("", 14, TXT, true);
+        remoteStatus.setPadding(0, dp(8), 0, 0);
+        sr.addView(remoteStatus);
+        wideBtn(sr, "♿ 접근성에서 '쟁부리 리모컨' 켜기").setOnClickListener(v -> {
+            try { startActivity(new android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)); toast("설치된 앱 → '쟁부리 리모컨'을 켜 주세요"); }
+            catch (Exception e) { toast("접근성 설정을 열지 못했어요"); }
+        });
+        sw(sr, "리모컨으로 앱 조작하기", "remoteOn", true);
+        for (int i = 0; i < RemoteKeys.SLOTS.length; i++) {
+            final int slot = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(8), 0, 0);
+            LinearLayout info = new LinearLayout(this);
+            info.setOrientation(LinearLayout.VERTICAL);
+            info.addView(text(RemoteKeys.SLOTS[i], 15, TXT, true));
+            slotCode[i] = text("", 12, SUB, false);
+            info.addView(slotCode[i]);
+            row.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
+            TextView learn = pill("배우기", CARD2, TXT);
+            learn.setOnClickListener(v -> {
+                RemoteKeys.learnSlot = slot;
+                slotCode[slot].setText("👉 지금 리모컨 버튼을 누르세요…");
+                slotCode[slot].setTextColor(ACC);
+            });
+            row.addView(learn);
+            slotAct[i] = pill("", ACC_DARK, ACC);
+            LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
+            ap.leftMargin = dp(8);
+            slotAct[i].setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
+                    .setTitle(RemoteKeys.SLOTS[slot] + " 버튼 동작")
+                    .setItems(RemoteKeys.ACTIONS, (d, which) -> { RemoteKeys.setAct(core, slot, which); updateRemote(); })
+                    .show());
+            row.addView(slotAct[i], ap);
+            sr.addView(row);
+        }
+        RemoteKeys.listener = (slot, code) -> runOnUiThread(() -> { updateRemote(); toast(RemoteKeys.SLOTS[slot] + " = " + RemoteKeys.codeName(code)); });
+
         // 8. 버튼 (고급)
         LinearLayout s8 = fold(col, "🎛 안경 버튼 동작 (고급)", false);
         s8.addView(hint("붙일 수 있는 동작: 그냥물어보기 / 사진 / 통역 / 듣기통역 / 다시듣기 / 칼로리 경찰 / 냉장고 셰프 / 가격 감별사 / 동물 속마음 / 코디 평가 / 주차 / 내차 / 위치 / 일기 / 팩트 / 회의 / 길안내\n바꾼 뒤에는 안경 대기를 껐다 켜 주세요."));
@@ -544,6 +586,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         camChips.select(core.usbMode() ? 1 : 0, false);
         updateKcal();
         updateKeyStatus();
+        updateRemote();
     }
 
     private void saveFields() {
@@ -618,6 +661,33 @@ public class MainActivity extends Activity implements AppCore.Ui {
             toast(n > 0 ? "✅ " + n + "개 넣었어요: " + got.toString().trim() : "넣을 설정을 찾지 못했어요. 4줄을 다시 복사해 주세요.");
         } catch (Exception e) { toast("붙여넣기 실패: " + e.getMessage()); }
     }
+
+    private void updateRemote() {
+        if (remoteStatus == null) return;
+        boolean on = RemoteService.running;
+        remoteStatus.setText(on ? "🟢 리모컨 받기 켜짐 (화면 꺼져도 동작)" : "⚪ 접근성 꺼짐 — 앱 화면이 켜져 있을 때만 동작해요");
+        remoteStatus.setTextColor(on ? GREEN : SUB);
+        for (int i = 0; i < 5; i++) {
+            if (RemoteKeys.learnSlot == i) continue;
+            int c = core.prefs.getInt("rk_code_" + i, RemoteKeys.DEFAULT_CODES[i]);
+            slotCode[i].setText("신호: " + RemoteKeys.codeName(c));
+            slotCode[i].setTextColor(SUB);
+            slotAct[i].setText(RemoteKeys.ACTIONS[RemoteKeys.act(core, i)].replace(" (AI 부르기)", ""));
+        }
+    }
+
+    /** 접근성이 꺼져 있을 때: 앱 화면에서 리모컨 버튼 받기 */
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (!RemoteService.running) {
+            int code = e.getKeyCode();
+            if (e.getAction() == android.view.KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                if (RemoteKeys.onKey(this, code)) { pressed.add(code); return true; }
+            } else if (e.getAction() == android.view.KeyEvent.ACTION_UP && pressed.remove(code)) return true;
+            else if (pressed.contains(code)) return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+    private final java.util.Set<Integer> pressed = new java.util.HashSet<>();
 
     private void testUsbCam() {
         if (core.busy) { toast("다른 작업 중이에요"); return; }
