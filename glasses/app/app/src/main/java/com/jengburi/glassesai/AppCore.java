@@ -110,7 +110,10 @@ public class AppCore {
                 try {
                     Thread.sleep(1500);
                     wifi.connect(ssid);
-                    for (String[] f : wifi.listAll()) {
+                    java.util.List<String[]> files = new java.util.ArrayList<>();
+                    if (ble.jianyun) { for (String n : wifi.listFtp()) files.add(new String[]{n, "0", ""}); }
+                    else files = wifi.listAll();
+                    for (String[] f : files) {
                         String name = f[0];
                         long size = 0; try { size = Long.parseLong(f[1]); } catch (Exception ignored) { }
                         if (done.contains(name)) continue;
@@ -118,7 +121,7 @@ public class AppCore {
                         if (size > 30 * 1024) { log("너무 커서 건너뜀: " + name); continue; }
                         java.io.File dst = new java.io.File(ctx.getCacheDir(), name.replace('/', '_'));
                         log("가져오는 중: " + name);
-                        wifi.downloadTo(name, dst);
+                        if (ble.jianyun) wifi.downloadFtpTo(name, dst); else wifi.downloadTo(name, dst);
                         if (dst.length() > 30L * 1024 * 1024) { dst.delete(); log("너무 커서 건너뜀: " + name); continue; }
                         got.add(dst); names.add(name);
                     }
@@ -133,8 +136,8 @@ public class AppCore {
                 for (int i = 0; i < got.size(); i++) {
                     java.io.File f = got.get(i);
                     String n = f.getName().toLowerCase();
-                    String mime = n.endsWith(".jpg") ? "image/jpeg" : n.endsWith(".mp4") ? "video/mp4"
-                            : (n.endsWith(".aac") || n.endsWith(".m4a")) ? "audio/aac" : "application/octet-stream";
+                    String mime = (n.endsWith(".jpg") || n.endsWith(".jpeg")) ? "image/jpeg" : n.endsWith(".mp4") ? "video/mp4"
+                            : n.endsWith(".wav") ? "audio/wav" : (n.endsWith(".aac") || n.endsWith(".m4a")) ? "audio/aac" : "application/octet-stream";
                     try {
                         byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
                         Uploader.upload(url, key, f.getName(), mime, b, null);
@@ -564,9 +567,9 @@ public class AppCore {
                     Thread.sleep(4000);
                     wifi.connect(ssid);
                 }
-                String name = wifi.latestPhoto();
+                String name = ble.jianyun ? wifi.latestPhotoFtp() : wifi.latestPhoto();
                 if (name == null) throw new Exception("안경에서 사진을 찾지 못했어요");
-                jpeg = wifi.download(name);
+                jpeg = ble.jianyun ? wifi.downloadFtp(name) : wifi.download(name);
             } finally {
                 wifi.disconnect();
                 ble.transferEnd();

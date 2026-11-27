@@ -129,7 +129,12 @@ public class GlassesBle {
             cmdChar = j.getCharacteristic(JY_CAM_WRITE);
             enableNotify(j.getCharacteristic(JY_CAM_NOTIFY));
             BluetoothGattService base = gatt.getService(JY_BASE_SERVICE);
-            if (base != null) enableNotify(base.getCharacteristic(JY_BASE_NOTIFY));
+            if (base != null) {
+                enableNotify(base.getCharacteristic(JY_BASE_NOTIFY));
+                jyBaseWrite = base.getCharacteristic(JY_BASE_WRITE);
+            }
+            jyName = dev.getName() == null ? "M88" : dev.getName();
+            jyMac = dev.getAddress().replace(":", "");
             log.log("안경 연결 완료 (M88 방식)");
         } else {
             throw new Exception("이 안경의 명령 통로(AA12 / 57FF)를 찾지 못했어요. 아직 지원하지 않는 방식이에요");
@@ -137,11 +142,26 @@ public class GlassesBle {
     }
 
     // ---- M88 (JIANYUN) 방식 ----
-    static final UUID JY_BASE_SERVICE = uuid16(0x56FF), JY_BASE_NOTIFY = uuid16(0x33F4);
+    static final UUID JY_BASE_SERVICE = uuid16(0x56FF), JY_BASE_NOTIFY = uuid16(0x33F4), JY_BASE_WRITE = uuid16(0x33F3);
+    private BluetoothGattCharacteristic jyBaseWrite;
+    private String jyName = "M88", jyMac = "";
+
+    /** M88 기본 채널(33F3)로 20바이트 명령 */
+    void sendBase(byte[] p20) throws Exception {
+        if (!isConnected()) connect();
+        if (jyBaseWrite == null) throw new Exception("M88 기본 채널을 찾지 못했어요");
+        jyBaseWrite.setValue(p20);
+        jyBaseWrite.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        gattEvents.clear();
+        if (!gatt.writeCharacteristic(jyBaseWrite)) throw new Exception("명령 전송 실패");
+        waitEvent("write", 5);
+        log.log("→ " + hex(p20));
+    }
+    static byte[] p20(int... b) { byte[] p = new byte[20]; for (int i = 0; i < b.length; i++) p[i] = (byte) b[i]; return p; }
     static final UUID JY_CAM_SERVICE = uuid16(0x57FF), JY_CAM_WRITE = uuid16(0x33F5), JY_CAM_NOTIFY = uuid16(0x33F6);
     public volatile boolean jianyun;
     /** M88 은 아직 사진을 휴대폰으로 가져오는 방법을 모름 */
-    public boolean canFetchPhoto() { return !jianyun; }
+    public boolean canFetchPhoto() { return true; }
 
     /** M88 명령: TT 00 01 00 01 00 01 00 VV + 0 채움 (20바이트) */
     static byte[] jyPacket(int type, int value) {
@@ -232,7 +252,21 @@ public class GlassesBle {
 
     /** 안경 핫스팟을 켜고 SSID 를 돌려준다. */
     public String wifiOn() throws Exception {
-        if (jianyun) throw new Exception("M88 안경은 아직 사진을 휴대폰으로 가져올 수 없어요 (사진은 안경에 저장돼요)");
+        if (jianyun) {
+            // 54 13 01 → 안경 와이파이(AP) 켜기, 54 13 02 / 54 04 02 = 준비 완료
+            clearPackets();
+            sendBase(p20(0x54, 0x13, 0x01));
+            long end = System.currentTimeMillis() + 20000;
+            boolean ready = false;
+            while (System.currentTimeMillis() < end) {
+                byte[] p = packets.poll(500, TimeUnit.MILLISECONDS);
+                if (p == null || p.length < 3 || (p[0] & 0xFF) != 0x54) continue;
+                if ((p[1] == 0x13 && p[2] == 0x02) || (p[1] == 0x04 && p[2] == 0x02)) { ready = true; break; }
+            }
+            String ssid = jyName + "-" + (jyMac.length() >= 4 ? jyMac.substring(jyMac.length() - 4) : jyMac);
+            log.log((ready ? "안경 와이파이 준비됨: " : "준비 신호는 못 받았지만 시도: ") + ssid);
+            return ssid;
+        }
         clearPackets();
         send(packet(CMD_WIFI_ON, 0x30));
         byte[] r = waitFor(EVT_WIFI_SSID, 10);
@@ -243,7 +277,7 @@ public class GlassesBle {
     }
 
     public void transferEnd() {
-        if (jianyun) return;
+        if (jianyun) { try { sendBase(p20(0x54, 0x13, 0x00)); } catch (Exception ignored) { } return; }
         try { send(packet(CMD_TRANSFER_END, 0x30, 0x01)); } catch (Exception ignored) { }
     }
 

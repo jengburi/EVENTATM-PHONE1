@@ -112,6 +112,29 @@ public class GlassesWifi {
         } finally { c.disconnect(); }
     }
 
+    // ---- M88 (FTP) ----
+    public String latestPhotoFtp() throws Exception {
+        try (Ftp f = new Ftp(network)) {
+            String best = null;
+            for (String n : f.list()) {
+                String l = n.toLowerCase();
+                if (!(l.endsWith(".jpg") || l.endsWith(".jpeg"))) continue;
+                if (best == null || n.compareTo(best) > 0) best = n;
+            }
+            log.log(best != null ? "최근 사진: " + best : "안경에 사진이 없어요");
+            return best;
+        }
+    }
+    public byte[] downloadFtp(String name) throws Exception {
+        try (Ftp f = new Ftp(network)) {
+            byte[] b = f.retr(name);
+            log.log("사진 받음 (" + (b.length / 1024) + "KB)");
+            return b;
+        }
+    }
+    public java.util.List<String> listFtp() throws Exception { try (Ftp f = new Ftp(network)) { return f.list(); } }
+    public void downloadFtpTo(String name, java.io.File dst) throws Exception { try (Ftp f = new Ftp(network)) { f.retrTo(name, dst); } }
+
     public byte[] download(String name) throws Exception {
         byte[] b = get(name, 20000);
         log.log("사진 받음 (" + (b.length / 1024) + "KB)");
