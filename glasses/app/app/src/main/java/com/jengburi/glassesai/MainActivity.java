@@ -295,6 +295,10 @@ public class MainActivity extends Activity implements AppCore.Ui {
 
         // --- 설정 ---
         col.addView(section("설정"));
+        Button pasteBtn = new Button(this);
+        pasteBtn.setText("📋 설정 한꺼번에 붙여넣기 (복사해 둔 4줄)");
+        pasteBtn.setOnClickListener(v -> pasteSettings());
+        col.addView(pasteBtn, new LinearLayout.LayoutParams(-1, -2));
         col.addView(label("Gemini API 키"));
         keyEdit = new EditText(this);
         keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -424,6 +428,31 @@ public class MainActivity extends Activity implements AppCore.Ui {
             String[] g = glassesList.get(id - 4000);
             core.selectGlasses(g[1], g[0]);
         });
+    }
+
+    /** 클립보드의 "키=…, 모델=…, 업로드주소=…, 비밀코드=…" 를 한 번에 넣기 */
+    private void pasteSettings() {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            CharSequence clip = cm.hasPrimaryClip() ? cm.getPrimaryClip().getItemAt(0).coerceToText(this) : null;
+            if (clip == null) { answer.setText("복사된 글이 없어요. 4줄을 먼저 복사해 주세요."); return; }
+            int n = 0;
+            android.content.SharedPreferences.Editor ed = core.prefs.edit();
+            for (String raw : clip.toString().split("\\r?\\n")) {
+                String line = raw.trim();
+                if (line.isEmpty()) continue;
+                String k = "", val = line;
+                int eq = line.indexOf('=');
+                if (eq > 0) { k = line.substring(0, eq).trim(); val = line.substring(eq + 1).trim(); }
+                if (k.contains("키") && !k.contains("비밀") || val.startsWith("AIza") || val.startsWith("AQ.")) { ed.putString("key", val); n++; }
+                else if (k.contains("모델") || val.startsWith("gemini")) { ed.putString("model", val); n++; }
+                else if (k.contains("주소") || val.startsWith("https://script.google.com")) { ed.putString("uploadUrl", val); n++; }
+                else if (k.contains("비밀")) { ed.putString("uploadKey", val); n++; }
+            }
+            ed.apply();
+            loadFields();
+            answer.setText(n > 0 ? "✅ 설정 " + n + "개를 넣었어요" : "넣을 설정을 찾지 못했어요. '키=…' 형식인지 확인해 주세요.");
+        } catch (Exception e) { answer.setText("붙여넣기 실패: " + e.getMessage()); }
     }
 
     private void updateServiceBtn() {
