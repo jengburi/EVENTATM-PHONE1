@@ -117,11 +117,47 @@ public class GlassesBle {
         gatt.discoverServices();
         waitEvent("services", 15);
         BluetoothGattService s = gatt.getService(SERVICE);
-        if (s == null) throw new Exception("안경 명령 서비스(AA12)를 찾지 못했어요");
-        cmdChar = s.getCharacteristic(CMD_CHAR);
-        enableNotify(s.getCharacteristic(NOTIFY_CHAR));
-        enableNotify(s.getCharacteristic(NOTIFY2_CHAR));
-        log.log("안경 연결 완료");
+        BluetoothGattService j = gatt.getService(JY_CAM_SERVICE);
+        if (s != null) {
+            jianyun = false;
+            cmdChar = s.getCharacteristic(CMD_CHAR);
+            enableNotify(s.getCharacteristic(NOTIFY_CHAR));
+            enableNotify(s.getCharacteristic(NOTIFY2_CHAR));
+            log.log("안경 연결 완료 (S1Pro 방식)");
+        } else if (j != null) {
+            jianyun = true;
+            cmdChar = j.getCharacteristic(JY_CAM_WRITE);
+            enableNotify(j.getCharacteristic(JY_CAM_NOTIFY));
+            BluetoothGattService base = gatt.getService(JY_BASE_SERVICE);
+            if (base != null) enableNotify(base.getCharacteristic(JY_BASE_NOTIFY));
+            log.log("안경 연결 완료 (M88 방식)");
+        } else {
+            throw new Exception("이 안경의 명령 통로(AA12 / 57FF)를 찾지 못했어요. 아직 지원하지 않는 방식이에요");
+        }
+    }
+
+    // ---- M88 (JIANYUN) 방식 ----
+    static final UUID JY_BASE_SERVICE = uuid16(0x56FF), JY_BASE_NOTIFY = uuid16(0x33F4);
+    static final UUID JY_CAM_SERVICE = uuid16(0x57FF), JY_CAM_WRITE = uuid16(0x33F5), JY_CAM_NOTIFY = uuid16(0x33F6);
+    public volatile boolean jianyun;
+    /** M88 은 아직 사진을 휴대폰으로 가져오는 방법을 모름 */
+    public boolean canFetchPhoto() { return !jianyun; }
+
+    /** M88 명령: TT 00 01 00 01 00 01 00 VV + 0 채움 (20바이트) */
+    static byte[] jyPacket(int type, int value) {
+        byte[] p = new byte[20];
+        p[0] = (byte) type; p[2] = 1; p[4] = 1; p[6] = 1; p[8] = (byte) value;
+        return p;
+    }
+
+    /** M88 AI 버튼 신호인지 (01 00 01 00 01 00 01 00 01) */
+    public static boolean isJyAiButton(byte[] p) {
+        return p.length >= 9 && p[0] == 1 && p[1] == 0 && p[2] == 1 && p[4] == 1 && p[6] == 1 && p[8] == 1;
+    }
+
+    /** M88 안경이 자체 AI 모드로 들어가지 않게 바로 끝내기 */
+    public void jyEndAiSession() {
+        try { send(jyPacket(0x08, 0x00)); } catch (Exception ignored) { }
     }
 
     private void enableNotify(BluetoothGattCharacteristic c) throws Exception {
@@ -176,6 +212,18 @@ public class GlassesBle {
 
     public void takePhoto() throws Exception {
         clearPackets();
+        if (jianyun) {
+            send(jyPacket(0x0a, 0x02));
+            // 파일 수 알림(54 06 NN)을 최대 8초 기다림
+            long end = System.currentTimeMillis() + 8000;
+            boolean ok = false;
+            while (System.currentTimeMillis() < end) {
+                byte[] p = packets.poll(500, TimeUnit.MILLISECONDS);
+                if (p != null && p.length >= 3 && (p[0] & 0xFF) == 0x54 && p[1] == 0x06) { ok = true; break; }
+            }
+            log.log(ok ? "찰칵! 촬영 완료 (안경에 저장)" : "촬영 완료 신호는 못 받았지만 계속 진행");
+            return;
+        }
         send(packet(CMD_TAKE_PHOTO, 0x30));
         // 촬영 완료 알림(0x42)을 최대 8초 기다림
         byte[] r = waitFor(EVT_MEDIA_COUNT, 8);
@@ -184,6 +232,7 @@ public class GlassesBle {
 
     /** 안경 핫스팟을 켜고 SSID 를 돌려준다. */
     public String wifiOn() throws Exception {
+        if (jianyun) throw new Exception("M88 안경은 아직 사진을 휴대폰으로 가져올 수 없어요 (사진은 안경에 저장돼요)");
         clearPackets();
         send(packet(CMD_WIFI_ON, 0x30));
         byte[] r = waitFor(EVT_WIFI_SSID, 10);
@@ -194,6 +243,7 @@ public class GlassesBle {
     }
 
     public void transferEnd() {
+        if (jianyun) return;
         try { send(packet(CMD_TRANSFER_END, 0x30, 0x01)); } catch (Exception ignored) { }
     }
 
@@ -224,7 +274,7 @@ public class GlassesBle {
 
     private void deliver(byte[] v) {
         // 음성 데이터(0x46)는 양이 많아서 큐에는 넣지 않음
-        boolean audio = v.length > 4 && (v[4] & 0xFF) == 0x46;
+        boolean audio = (v.length > 4 && (v[4] & 0xFF) == 0x46) || (jianyun && v.length > 60 && v[0] == 0x02);
         if (!audio) packets.offer(v);
         PacketListener l = listener;
         if (l != null) { try { l.onPacket(v); } catch (Exception ignored) { } }

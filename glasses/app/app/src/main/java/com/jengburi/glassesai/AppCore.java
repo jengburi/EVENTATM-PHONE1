@@ -303,6 +303,14 @@ public class AppCore {
 
     // ---------- 안경 버튼 ----------
     private void onPacket(byte[] p) {
+        if (ble.jianyun) {
+            if (GlassesBle.isJyAiButton(p)) {
+                log("M88 AI 버튼");
+                new Thread(ble::jyEndAiSession).start();
+                action("안경 AI 버튼", parseAction(prefs.getString("actM88", "")));
+            }
+            return;
+        }
         if (p.length < 6 || (p[0] & 0xFF) != 0xAC) return;
         int cmd = p[4] & 0xFF;
         if (cmd == 0x46 || cmd == 0x17 || cmd == 0x53 || cmd == 0x45) return;
@@ -395,7 +403,10 @@ public class AppCore {
                         prefs.edit().putString("interpLang", code == null ? "자동" : Interpreter.nameOf(code)).apply();
                         pendingInterp = 1; return;
                     }
-                    if (a.contains("[사진]")) {
+                    if (a.contains("[사진]") && !ble.canFetchPhoto()) {
+                        a = "이 안경은 아직 사진을 휴대폰으로 가져올 수 없어서, 보는 질문에는 답하기 어려워요. 다른 건 물어보세요.";
+                        speakQueued(a, Locale.KOREAN);
+                    } else if (a.contains("[사진]")) {
                         say("잠깐만요, 볼게요");
                         byte[] jpeg = capturePhoto();
                         photoForChat = jpeg;
