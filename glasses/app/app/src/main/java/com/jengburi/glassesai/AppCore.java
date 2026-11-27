@@ -504,7 +504,12 @@ public class AppCore {
         Gemini.lastFallbackModel = null;
         String a = Gemini.askWithRetry(key(), models(), prompt, jpeg, wav, this::log);
         String fb = Gemini.lastFallbackModel;
-        if (fb != null && !models().contains(fb)) prefs.edit().putString("model", fb + ", " + models()).apply();
+        if (fb != null) {
+            // 성공한 모델을 맨 앞으로
+            StringBuilder rest = new StringBuilder();
+            for (String m : models().split(",")) { m = m.trim(); if (!m.isEmpty() && !m.equals(fb)) rest.append(", ").append(m); }
+            prefs.edit().putString("model", fb + rest).apply();
+        }
         return a;
     }
 

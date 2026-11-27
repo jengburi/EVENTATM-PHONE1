@@ -27,16 +27,19 @@ public class Gemini {
         for (String model : models.split(",")) {
             model = model.trim();
             if (model.isEmpty()) continue;
-            for (int attempt = 1; attempt <= 3; attempt++) {
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                long t0 = System.currentTimeMillis();
                 try {
-                    return ask(apiKey, model, prompt, jpeg, wav);
+                    String a = ask(apiKey, model, prompt, jpeg, wav);
+                    log.log(model + " 응답 " + String.format("%.1f", (System.currentTimeMillis() - t0) / 1000.0) + "초");
+                    return a;
                 } catch (Exception e) {
                     last = e;
                     String m = String.valueOf(e.getMessage());
-                    boolean busy = m.contains(" 503") || m.contains(" 429") || m.contains(" 500");
-                    if (!busy) break;
-                    log.log(model + " 혼잡 → " + (attempt * 3) + "초 후 다시 시도 (" + attempt + "/3)");
-                    Thread.sleep(attempt * 3000L);
+                    boolean busy = m.contains(" 503") || m.contains(" 429") || m.contains(" 500") || m.contains("timeout") || m.contains("timed out");
+                    if (!busy || attempt == 2) { log.log(model + " 실패 → 다음 모델"); break; }
+                    log.log(model + " 혼잡 → 1.5초 후 한 번 더");
+                    Thread.sleep(1500L);
                 }
             }
         }
@@ -126,7 +129,7 @@ public class Gemini {
                 + URLEncoder.encode(model, "UTF-8") + method);
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
         c.setRequestMethod("POST");
-        c.setConnectTimeout(20000); c.setReadTimeout(60000);
+        c.setConnectTimeout(15000); c.setReadTimeout(30000);
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json");
         c.setRequestProperty("x-goog-api-key", apiKey);
