@@ -462,7 +462,16 @@ public class MainActivity extends Activity implements AppCore.Ui {
             try { startActivity(new android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)); toast("설치된 앱 → '쟁부리 리모컨'을 켜 주세요"); }
             catch (Exception e) { toast("접근성 설정을 열지 못했어요"); }
         });
-        sw(sr, "리모컨으로 앱 조작하기", "remoteOn", true);
+        sw(sr, "리모컨으로 앱 조작하기", "remoteOn", true).setOnCheckedChangeListener((v, on) -> {
+            core.prefs.edit().putBoolean("remoteOn", on).apply();
+            RemoteService r = RemoteService.inst; if (r != null && RemoteService.running) r.applyMouse();
+        });
+        CompoundButton mouseSw = sw(sr, "커서 방식 리모컨 받기 (BLE-M3 등, 안드로이드 14 이상)", "remoteMouse", true);
+        mouseSw.setOnCheckedChangeListener((v, on) -> {
+            core.prefs.edit().putBoolean("remoteMouse", on).apply();
+            RemoteService r = RemoteService.inst; if (r != null && RemoteService.running) r.applyMouse();
+        });
+        sr.addView(hint("※ 켜 두면 리모컨 커서가 움직이지 않고 버튼으로 동작해요. 커서가 필요하면 끄세요."));
         signalView = text("📡 들어온 신호: (리모컨 버튼을 눌러 보세요)", 13, ACC, true);
         signalView.setPadding(0, dp(10), 0, dp(4));
         sr.addView(signalView);
@@ -703,9 +712,15 @@ public class MainActivity extends Activity implements AppCore.Ui {
         return true;
     }
 
+    private MouseGesture mouseG;
     @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent e) {
         android.view.InputDevice d = e.getDevice();
-        if (d != null && d.isExternal()) showSignal("움직임 신호 (마우스/스크롤) · " + d.getName() + " → 리모컨 모드를 바꿔 보세요");
+        if (d != null && d.isExternal() && !RemoteService.running) {
+            showSignal("커서 움직임 · " + d.getName());
+            if (mouseG == null) mouseG = new MouseGesture(this);
+            mouseG.feed(e);
+            return true;
+        }
         return super.dispatchGenericMotionEvent(e);
     }
 

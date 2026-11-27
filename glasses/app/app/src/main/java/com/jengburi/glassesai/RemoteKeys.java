@@ -29,6 +29,12 @@ public class RemoteKeys {
     public static volatile Listener listener;
 
     static int code(AppCore c, int slot) { return c.prefs.getInt("rk_code_" + slot, DEFAULT_CODES[slot]); }
+    static final int[] SWIPE_DEFAULTS = {SWIPE_LEFT, SWIPE_RIGHT, SWIPE_UP, SWIPE_DOWN, TAP};
+    /** 이 칸에 해당하는 신호인지 (배우기 전이면 방향키와 커서·터치 방향 둘 다 인정) */
+    static boolean matches(AppCore c, int slot, int code) {
+        if (code(c, slot) == code) return true;
+        return !c.prefs.contains("rk_code_" + slot) && SWIPE_DEFAULTS[slot] == code;
+    }
     public static int act(AppCore c, int slot) { return c.prefs.getInt("rk_act_" + slot, DEFAULT_ACTS[slot]); }
     public static void setAct(AppCore c, int slot, int act) { c.prefs.edit().putInt("rk_act_" + slot, act).apply(); }
     public static boolean enabled(AppCore c) { return c.prefs.getBoolean("remoteOn", true); }
@@ -73,7 +79,7 @@ public class RemoteKeys {
         }
         if (!enabled(c)) return false;
         for (int i = 0; i < SLOTS.length; i++) {
-            if (code(c, i) != code) continue;
+            if (!matches(c, i, code)) continue;
             int a = act(c, i);
             if (a < 0 || a >= ACTION_KEYS.length || ACTION_KEYS[a].isEmpty()) return false;
             c.log("🎮 리모컨 " + SLOTS[i] + " → " + ACTIONS[a]);
@@ -86,7 +92,7 @@ public class RemoteKeys {
     public static boolean isMapped(AppCore c, int code) {
         if (!enabled(c)) return false;
         for (int i = 0; i < SLOTS.length; i++) {
-            if (code(c, i) != code) continue;
+            if (!matches(c, i, code)) continue;
             int a = act(c, i);
             return a >= 0 && a < ACTION_KEYS.length && !ACTION_KEYS[a].isEmpty();
         }

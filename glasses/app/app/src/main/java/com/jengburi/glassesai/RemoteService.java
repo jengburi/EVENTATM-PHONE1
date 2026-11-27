@@ -12,10 +12,33 @@ public class RemoteService extends AccessibilityService {
     public static volatile boolean running;
     private final Set<Integer> consumed = new HashSet<>();
 
+    private MouseGesture mouse;
+
     @Override protected void onServiceConnected() {
         running = true;
+        mouse = new MouseGesture(this);
         AppCore.get(this).log("🎮 리모컨 받기 켜짐 (접근성)");
+        applyMouse();
     }
+
+    /** 커서 방식 리모컨(BLE-M3 등): 안드로이드 14 이상에서 마우스 움직임을 가로채서 방향 버튼으로 */
+    public void applyMouse() {
+        if (android.os.Build.VERSION.SDK_INT < 34) return;
+        try {
+            android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+            boolean on = RemoteKeys.enabled(AppCore.get(this)) && AppCore.get(this).prefs.getBoolean("remoteMouse", true);
+            info.setMotionEventSources(on ? android.view.InputDevice.SOURCE_MOUSE : 0);
+            setServiceInfo(info);
+            if (on) AppCore.get(this).log("🎮 커서 방식 리모컨도 받는 중 (커서 대신 버튼으로 동작)");
+        } catch (Throwable t) { AppCore.get(this).log("커서 가로채기 실패: " + t.getMessage()); }
+    }
+
+    @Override public void onMotionEvent(android.view.MotionEvent e) {
+        if (mouse != null) mouse.feed(e);
+    }
+
+    public static volatile RemoteService inst;
+    { inst = this; }
 
     @Override protected boolean onKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
