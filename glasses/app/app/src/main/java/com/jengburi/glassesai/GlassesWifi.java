@@ -113,8 +113,24 @@ public class GlassesWifi {
     }
 
     // ---- M88 (FTP) ----
+    /** 와이파이에 붙은 직후엔 안경 FTP 서버가 아직 안 떠 있을 수 있어서 1초 간격으로 다시 시도 */
+    private Ftp openFtp() throws Exception {
+        Exception last = null;
+        for (int i = 1; i <= 15; i++) {
+            try {
+                Ftp f = new Ftp(network);
+                if (i > 1) log.log("안경 파일 서버 접속 성공 (" + i + "번째)");
+                return f;
+            } catch (Exception e) {
+                last = e;
+                if (i == 1) log.log("안경 파일 서버 준비 기다리는 중…");
+                Thread.sleep(1000);
+            }
+        }
+        throw new Exception("안경 파일 서버에 접속하지 못했어요: " + (last == null ? "" : last.getMessage()));
+    }
     public String latestPhotoFtp() throws Exception {
-        try (Ftp f = new Ftp(network)) {
+        try (Ftp f = openFtp()) {
             String best = null;
             for (String n : f.list()) {
                 String l = n.toLowerCase();
@@ -126,14 +142,14 @@ public class GlassesWifi {
         }
     }
     public byte[] downloadFtp(String name) throws Exception {
-        try (Ftp f = new Ftp(network)) {
+        try (Ftp f = openFtp()) {
             byte[] b = f.retr(name);
             log.log("사진 받음 (" + (b.length / 1024) + "KB)");
             return b;
         }
     }
-    public java.util.List<String> listFtp() throws Exception { try (Ftp f = new Ftp(network)) { return f.list(); } }
-    public void downloadFtpTo(String name, java.io.File dst) throws Exception { try (Ftp f = new Ftp(network)) { f.retrTo(name, dst); } }
+    public java.util.List<String> listFtp() throws Exception { try (Ftp f = openFtp()) { return f.list(); } }
+    public void downloadFtpTo(String name, java.io.File dst) throws Exception { try (Ftp f = openFtp()) { f.retrTo(name, dst); } }
 
     public byte[] download(String name) throws Exception {
         byte[] b = get(name, 20000);

@@ -266,6 +266,7 @@ public class GlassesBle {
             }
             String ssid = jyName + "-" + (jyMac.length() >= 4 ? jyMac.substring(jyMac.length() - 4) : jyMac);
             log.log((ready ? "안경 와이파이 준비됨: " : "준비 신호는 못 받았지만 시도: ") + ssid);
+            Thread.sleep(2000); // 와이파이가 실제로 보이기까지 조금 더
             return ssid;
         }
         clearPackets();
