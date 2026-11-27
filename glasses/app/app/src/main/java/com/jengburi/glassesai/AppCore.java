@@ -3,6 +3,7 @@ package com.jengburi.glassesai;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.location.LocationManager;
+import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 
@@ -548,6 +549,8 @@ public class AppCore {
     private android.os.PowerManager.WakeLock wakeLock;
     void setBusy(boolean b) {
         busy = b;
+        if (b && wakeWord != null && Looper.myLooper() != Looper.getMainLooper()) wakeWord.pauseNow();
+        else if (b && wakeWord != null) new Thread(wakeWord::pauseNow).start();
         try {
             if (b) {
                 if (wakeLock == null) {

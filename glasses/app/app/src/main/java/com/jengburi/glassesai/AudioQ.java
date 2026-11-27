@@ -29,6 +29,7 @@ public class AudioQ {
      */
     @SuppressLint("MissingPermission")
     public static void stream(Context ctx, boolean glassesMic, Running running, ChunkSink sink, GlassesBle.Log log) {
+        try { AppCore.get(ctx).wakeWord.pauseNow(); } catch (Exception ignored) { }
         AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
         boolean sco = glassesMic && useGlassesMic(am, log);
         AudioRecord rec = null;
@@ -118,6 +119,7 @@ public class AudioQ {
      */
     @SuppressLint("MissingPermission")
     public static byte[] record(Context ctx, boolean glassesMic, int waitSec, int maxSec, GlassesBle.Log log) {
+        try { AppCore.get(ctx).wakeWord.pauseNow(); } catch (Exception ignored) { }
         AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
         boolean sco = glassesMic && useGlassesMic(am, log);
         AudioRecord rec = null;

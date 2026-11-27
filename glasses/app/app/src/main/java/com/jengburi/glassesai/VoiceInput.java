@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 public class VoiceInput {
     public static String listen(Context ctx, int timeoutSec, boolean glassesMic, GlassesBle.Log log) {
         if (!SpeechRecognizer.isRecognitionAvailable(ctx)) { log.log("이 휴대폰은 음성 인식을 지원하지 않아요"); return null; }
+        try { AppCore.get(ctx).wakeWord.pauseNow(); } catch (Exception ignored) { }
         AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
         boolean usedBt = glassesMic && useBluetoothMic(am, log);
         Handler main = new Handler(Looper.getMainLooper());

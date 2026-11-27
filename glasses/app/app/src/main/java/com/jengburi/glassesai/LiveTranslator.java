@@ -118,6 +118,7 @@ public class LiveTranslator {
         core.log("실시간 통역 연결됨 (" + model + ")");
         if (audioOut) startPlayer();
 
+        core.wakeWord.pauseNow();
         AudioManager am = (AudioManager) core.ctx.getSystemService(Context.AUDIO_SERVICE);
         boolean sco = glassesMic && AudioQ.useGlassesMic(am, core::log);
         AudioRecord rec = null;

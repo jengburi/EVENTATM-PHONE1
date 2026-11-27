@@ -44,6 +44,19 @@ public class WakeWord {
         core.log("호출어 대기 끝");
     }
 
+    /** 다른 작업이 마이크를 써야 할 때 즉시 듣기 멈춤 (작업이 끝나면 listen() 이 알아서 다시 시작) */
+    public void pauseNow() {
+        if (!running) return;
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        main.post(() -> {
+            if (sr != null) { try { sr.cancel(); sr.destroy(); } catch (Exception ignored) { } sr = null; }
+            mute(false);
+            done.countDown();
+        });
+        try { done.await(1, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+        try { Thread.sleep(300); } catch (InterruptedException ignored) { } // 마이크가 완전히 풀릴 시간
+    }
+
     String word() { return core.prefs.getString("wakeWord", "쟁부리야"); }
 
     /** 비교용: 띄어쓰기·끝의 '야/아' 빼기 */
