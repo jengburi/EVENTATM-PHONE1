@@ -3,6 +3,7 @@ package com.jengburi.glassesai;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,6 +16,8 @@ import java.util.ArrayList;
 /**
  * 휴대폰 마이크로 계속 듣다가 호출어("쟁부리야")가 들리면 '그냥 물어보기'를 실행.
  * "쟁부리야 오늘 날씨 어때"처럼 이어서 말하면 뒤의 질문을 바로 사용.
+ * 발음이 조금 달라도(쟁불이·장부리·잼부리·생부리…) 자모 단위로 비슷하면 인정.
+ * 인식기 3가지(기기 내장 → 기본 오프라인 → 기본 온라인)를 차례로 시도.
  */
 public class WakeWord {
     private final AppCore core;
@@ -22,7 +25,10 @@ public class WakeWord {
     private SpeechRecognizer sr;
     private volatile boolean running;
     private boolean muted;
-    private volatile boolean preferOffline = true;
+    /** 0 = 기기 내장 인식기, 1 = 기본(오프라인 우선), 2 = 기본(온라인) */
+    private int mode = 0;
+    private int badErrors = 0, lastErr = -1;
+    private String lastLogged = "";
     /** 마지막으로 알아들은 말 (화면 표시용) */
     public volatile String lastHeard = "";
 
@@ -34,69 +40,113 @@ public class WakeWord {
         if (running) return;
         if (!SpeechRecognizer.isRecognitionAvailable(core.ctx)) { core.log("이 휴대폰은 음성 인식을 지원하지 않아 호출어를 쓸 수 없어요"); return; }
         running = true;
-        core.log("호출어 대기 시작: \"" + word() + "\"");
+        mode = onDeviceOk() ? 0 : 1;
+        badErrors = 0;
+        core.log("호출어 대기 시작: \"" + word() + "\" (" + modeName() + ")");
         main.post(this::listen);
     }
 
     public void stop() {
         running = false;
-        main.post(() -> {
-            if (sr != null) { try { sr.cancel(); sr.destroy(); } catch (Exception ignored) { } sr = null; }
-            mute(false);
-        });
+        main.post(() -> { destroy(); mute(false); });
         core.log("호출어 대기 끝");
+    }
+
+    private void destroy() {
+        if (sr != null) { try { sr.cancel(); sr.destroy(); } catch (Exception ignored) { } sr = null; }
     }
 
     /** 다른 작업이 마이크를 써야 할 때 즉시 듣기 멈춤 (작업이 끝나면 listen() 이 알아서 다시 시작) */
     public void pauseNow() {
         if (!running) return;
         java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
-        main.post(() -> {
-            if (sr != null) { try { sr.cancel(); sr.destroy(); } catch (Exception ignored) { } sr = null; }
-            mute(false);
-            done.countDown();
-        });
+        main.post(() -> { destroy(); mute(false); done.countDown(); });
         try { done.await(1, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
         try { Thread.sleep(300); } catch (InterruptedException ignored) { } // 마이크가 완전히 풀릴 시간
     }
 
     String word() { return core.prefs.getString("wakeWord", "쟁부리야"); }
 
-    /** 비교용: 띄어쓰기·끝의 '야/아' 빼기 */
-    static String norm(String s) { return s == null ? "" : s.replace(" ", "").replace(",", "").replace(".", ""); }
+    private boolean onDeviceOk() {
+        try { return Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(core.ctx); }
+        catch (Exception e) { return false; }
+    }
+
+    private String modeName() { return mode == 0 ? "기기 내장 인식" : mode == 1 ? "기본 인식·오프라인" : "기본 인식·온라인"; }
+
+    private void nextMode(String why) {
+        if (mode >= 2) return;
+        mode++;
+        badErrors = 0;
+        destroy();
+        core.log("호출어: " + why + " → " + modeName() + "으로 바꿀게요");
+    }
+
+    // ---------------- 호출어 비교 ----------------
+
+    static String norm(String s) {
+        return s == null ? "" : s.replace(" ", "").replace(",", "").replace(".", "").replace("!", "").replace("?", "").replace("~", "");
+    }
+
+    /** 한글을 자모로 풀기 (쟁 → ㅈㅐㅇ) */
+    static String jamo(String s) {
+        StringBuilder b = new StringBuilder();
+        for (char c : s.toCharArray()) {
+            if (c >= 0xAC00 && c <= 0xD7A3) {
+                int x = c - 0xAC00;
+                b.append((char) (0x1100 + x / 588)).append((char) (0x1161 + (x % 588) / 28));
+                if (x % 28 > 0) b.append((char) (0x11A7 + x % 28));
+            } else b.append(c);
+        }
+        return b.toString();
+    }
+
+    static int lev(String a, String b) {
+        int[] p = new int[b.length() + 1], q = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) p[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            q[0] = i;
+            for (int j = 1; j <= b.length(); j++)
+                q[j] = Math.min(Math.min(q[j - 1] + 1, p[j] + 1), p[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
+            int[] t = p; p = q; q = t;
+        }
+        return p[b.length()];
+    }
+
+    static String stripBase(String w) {
+        return (w.length() > 1 && (w.endsWith("야") || w.endsWith("아"))) ? w.substring(0, w.length() - 1) : w;
+    }
 
     /** 인식 결과에서 호출어를 찾으면 그 뒤의 말을 돌려줌 (없으면 null) */
     String match(String heard) {
         String h = norm(heard);
-        String w = norm(word());
-        String base = w.endsWith("야") || w.endsWith("아") ? w.substring(0, w.length() - 1) : w;
-        java.util.List<String> keys = new ArrayList<>();
-        keys.add(base);
-        if (base.equals("쟁부리")) { keys.add("장부리"); keys.add("잼부리"); keys.add("젱부리"); keys.add("쟁불이"); keys.add("쟁부이"); keys.add("쟁보리"); }
-        // 기본 호출어가 '쟁부리'면 '○부리'로 들려도 인정 (장부리·챙부리·생부리 등)
-        if (base.equals("쟁부리")) {
+        if (h.isEmpty()) return null;
+        java.util.List<String> bases = new ArrayList<>();
+        String base = stripBase(norm(word()));
+        if (!base.isEmpty()) bases.add(base);
+        // 쟁부리 계열(쟁불이·장부리 등)로 바꿔 적었어도 기본 이름도 같이 인정
+        if (lev(jamo(base), jamo("쟁부리")) <= 2 && !base.equals("쟁부리")) bases.add("쟁부리");
+        int bestD = 99, bestEnd = -1;
+        for (String b : bases) {
+            String bj = jamo(b);
+            int tol = bj.length() >= 7 ? 2 : bj.length() >= 4 ? 1 : 0;
+            int L = b.length();
+            for (int len = Math.max(1, L - 1); len <= L + 1; len++) {
+                for (int i = 0; i + len <= h.length(); i++) {
+                    int d = lev(jamo(h.substring(i, i + len)), bj);
+                    if (d <= tol && (d < bestD || (d == bestD && i + len < bestEnd))) { bestD = d; bestEnd = i + len; }
+                }
+            }
+        }
+        // 기본 쟁부리 계열이면 '○부리'로 들려도 인정
+        if (bestEnd < 0 && bases.contains("쟁부리") || bestEnd < 0 && base.equals("쟁부리")) {
             int i = h.indexOf("부리");
-            if (i >= 1) {
-                String rest = h.substring(i + 2);
-                if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
-                return rest;
-            }
-            int j = h.indexOf("부이");
-            if (j >= 1 && (h.charAt(j - 1) == '쟁' || h.charAt(j - 1) == '장')) {
-                String rest = h.substring(j + 2);
-                if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
-                return rest;
-            }
+            if (i >= 1 && i <= 3) bestEnd = i + 2;
         }
-        for (String k : keys) {
-            int i = h.indexOf(k);
-            if (i >= 0) {
-                String rest = h.substring(i + k.length());
-                if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
-                return rest;
-            }
-        }
-        return null;
+        if (bestEnd < 0) return null;
+        String rest = h.substring(bestEnd);
+        if (rest.startsWith("야") || rest.startsWith("아")) rest = rest.substring(1);
+        return rest;
     }
 
     private void mute(boolean on) {
@@ -117,7 +167,8 @@ public class WakeWord {
         if (core.busy || core.isSpeaking()) { mute(false); main.postDelayed(this::listen, 1000); return; }
         try {
             if (sr == null) {
-                sr = SpeechRecognizer.createSpeechRecognizer(core.ctx);
+                if (mode == 0 && Build.VERSION.SDK_INT >= 31) sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(core.ctx);
+                else sr = SpeechRecognizer.createSpeechRecognizer(core.ctx);
                 sr.setRecognitionListener(listener);
             }
             mute(true);
@@ -125,34 +176,61 @@ public class WakeWord {
             it.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             it.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR");
             it.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-            it.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-            it.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline);
-            it.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200);
+            it.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+            if (mode != 0) it.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, mode == 1);
+            it.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000);
             sr.startListening(it);
         } catch (Exception e) {
-            main.postDelayed(this::listen, 2000);
+            if (mode == 0) nextMode("기기 내장 인식 시작 실패");
+            main.postDelayed(this::listen, 1500);
         }
     }
 
     private boolean handle(Bundle b, boolean finalResult) {
         ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (r == null) return false;
-        if (!r.isEmpty() && r.get(0) != null && !r.get(0).trim().isEmpty()) lastHeard = r.get(0);
+        if (r == null || r.isEmpty()) return false;
+        if (r.get(0) != null && !r.get(0).trim().isEmpty()) lastHeard = r.get(0);
+        // 부분 결과에서 호출어만 말한 경우도 바로 깨우기 (빠르게)
         for (String heard : r) {
             String rest = match(heard);
             if (rest == null) continue;
-            // 이어서 질문까지 말했으면 끝까지 듣고, 호출어만이면 바로 깨우기
-            if (!finalResult && rest.trim().isEmpty()) return false;
-            if (!finalResult) return false;
-            try { sr.cancel(); } catch (Exception ignored) { }
+            if (!finalResult && !rest.trim().isEmpty()) return false; // 질문을 이어서 말하는 중 → 끝까지 듣기
+            if (!finalResult) {
+                // 호출어만 들림: 0.6초 더 기다려 보고 이어지는 말이 없으면 결과를 기다림
+                return false;
+            }
+            destroy();
             mute(false);
-            core.log("호출어 들림: \"" + heard + "\"");
+            core.log("✅ 호출어 들림: \"" + heard + "\"");
             final String q = rest.trim();
             main.post(() -> core.wake(q));
             main.postDelayed(this::listen, 1500);
             return true;
         }
+        if (finalResult && !r.get(0).equals(lastLogged)) {
+            lastLogged = r.get(0);
+            core.log("👂 들은 말: \"" + r.get(0) + "\" (호출어 아님)");
+        }
         return false;
+    }
+
+    static String errName(int e) {
+        switch (e) {
+            case 1: return "네트워크 시간초과";
+            case 2: return "네트워크 오류";
+            case 3: return "마이크 오류";
+            case 4: return "서버 오류";
+            case 5: return "인식기 오류";
+            case 6: return "말 없음";
+            case 7: return "못 알아들음";
+            case 8: return "인식기 사용 중";
+            case 9: return "권한 없음";
+            case 10: return "요청 과다";
+            case 11: return "서버 연결 끊김";
+            case 12: return "한국어 미지원";
+            case 13: return "한국어 데이터 없음";
+            default: return "오류";
+        }
     }
 
     private final RecognitionListener listener = new RecognitionListener() {
@@ -164,16 +242,21 @@ public class WakeWord {
         @Override public void onPartialResults(Bundle b) { handle(b, false); }
         @Override public void onEvent(int t, Bundle b) { }
         @Override public void onResults(Bundle b) {
-            if (!handle(b, true)) main.postDelayed(WakeWord.this::listen, 150);
+            badErrors = 0;
+            if (!handle(b, true)) main.postDelayed(WakeWord.this::listen, 100);
         }
         @Override public void onError(int e) {
-            // 오프라인 한국어 음성 데이터가 없으면 온라인 인식으로
-            if (preferOffline && (e == 12 || e == 13 || e == SpeechRecognizer.ERROR_SERVER || e == SpeechRecognizer.ERROR_NETWORK)) {
-                preferOffline = false;
-                core.log("오프라인 음성 인식이 안 돼서 온라인 인식으로 바꿀게요 (오류 " + e + ")");
+            boolean normal = e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+            if (!normal) {
+                if (e != lastErr) core.log("호출어 인식 문제: " + errName(e) + " (코드 " + e + ", " + modeName() + ")");
+                lastErr = e;
+                badErrors++;
+                if (e == 12 || e == 13) nextMode(errName(e));
+                else if (badErrors >= 4) nextMode("오류가 반복됨");
             }
-            int delay = (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) ? 1500 : 250;
-            if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && sr != null) { try { sr.destroy(); } catch (Exception ignored) { } sr = null; }
+            if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) core.log("마이크 권한을 '항상 허용'으로 바꿔 주세요");
+            int delay = normal ? 100 : (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) ? 1500 : 500;
+            if (!normal) destroy(); // 문제가 생기면 인식기를 새로 만들기
             main.postDelayed(WakeWord.this::listen, delay);
         }
     };
