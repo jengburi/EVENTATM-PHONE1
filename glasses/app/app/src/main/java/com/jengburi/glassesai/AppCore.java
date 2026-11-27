@@ -67,6 +67,16 @@ public class AppCore {
         ble.listener = this::onPacket;
         interp = new Interpreter(this);
         ble.preferredAddress = prefs.getString("glassesAddr", "");
+        wakeWord = new WakeWord(this);
+    }
+
+    public final WakeWord wakeWord;
+
+    /** 호출어가 들렸을 때: 뒤에 질문이 있으면 바로 묻고, 없으면 '삐' 후 듣기 */
+    public void wake(String question) {
+        if (busy) return;
+        if (question == null || question.trim().length() < 2) smartAsk("호출어");
+        else smartAsk("호출어", question);
     }
 
     // ---------- 드라이브 업로드 (블로그/쇼츠용) ----------
@@ -376,7 +386,10 @@ public class AppCore {
             + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
 
     /** 그냥 물어보기: 말로 묻고, 앞을 봐야 하는 질문이면 자동으로 찍어서 대답. 이어서 대화 가능. */
-    public synchronized void smartAsk(String source) {
+    public synchronized void smartAsk(String source) { smartAsk(source, null); }
+
+    /** firstText: 호출어와 함께 이미 말한 질문(글자). 있으면 첫 질문은 녹음 없이 이걸로. */
+    public synchronized void smartAsk(String source, String firstText) {
         long now = System.currentTimeMillis();
         if (busy || now - lastTrigger < 1500) return;
         lastTrigger = now;
@@ -388,10 +401,14 @@ public class AppCore {
                 StringBuilder past = new StringBuilder();
                 byte[] photoForChat = null;
                 for (int turn = 0; turn < 8; turn++) {
-                    byte[] wav = AudioQ.record(ctx, glassesMic(), turn == 0 ? 7 : 6, 15, this::log);
-                    if (wav == null) { if (turn == 0) say("못 들었어요"); return; }
+                    String qText = (turn == 0 && firstText != null && firstText.trim().length() >= 2) ? firstText.trim() : null;
+                    byte[] wav = null;
+                    if (qText == null) {
+                        wav = AudioQ.record(ctx, glassesMic(), turn == 0 ? 7 : 6, 15, this::log);
+                        if (wav == null) { if (turn == 0) say("못 들었어요"); return; }
+                    } else log("질문: " + qText);
                     answer("생각 중…");
-                    String prompt = SMART_PROMPT + COMMON_TAIL;
+                    String prompt = (qText == null ? SMART_PROMPT : SMART_PROMPT.replace("사용자가 음성으로 질문했어(첨부된 오디오).", "사용자 질문: " + qText)) + COMMON_TAIL;
                     if (ble.battery >= 0) prompt += "\n(참고: 지금 안경 배터리는 " + ble.battery + "%" + (ble.charging ? ", 충전 중" : "") + ". 배터리를 물어보면 이 값으로 답해.)";
                     if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
                     if (photoForChat != null) prompt += "\n\n(앞서 찍은 사진이 함께 첨부돼 있어. 사진 관련 질문이면 이 사진을 보고 답해.)";
@@ -417,14 +434,16 @@ public class AppCore {
                         newPhoto = jpeg;
                         log("인터넷 연결 기다리는 중…");
                         if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
-                        String p2 = prompt(mode()) + "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 사진을 보고 그 질문에 먼저 답해 줘. 질문을 다시 적지 마.";
+                        String p2 = prompt(mode()) + (qText == null
+                                ? "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 사진을 보고 그 질문에 먼저 답해 줘. 질문을 다시 적지 마."
+                                : "\n\n사용자 질문: " + qText + "\n사진을 보고 이 질문에 먼저 답해 줘.");
                         if (past.length() > 0) p2 += "\n\n지금까지 대화:\n" + past;
                         a = askSpoken(p2, jpeg, wav).replace("[사진]", "").trim();
                     }
                     answer(a);
-                    History.save(ctx, newPhoto, "그냥 물어보기", "(음성 질문)", a, toGallery());
+                    History.save(ctx, newPhoto, "그냥 물어보기", qText != null ? qText : "(음성 질문)", a, toGallery());
                     Ui u = ui; if (u != null) u.onHistoryChanged();
-                    past.append("사용자: (음성 질문)\nAI: ").append(a).append("\n");
+                    past.append("사용자: ").append(qText != null ? qText : "(음성 질문)").append("\nAI: ").append(a).append("\n");
                     boolean finished = waitSpeechDone(180);
                     if (!finished || !prefs.getBoolean("smartFollow", true)) return;
                     log("더 물어보실 게 있으면 삐 소리 뒤에 말씀하세요");

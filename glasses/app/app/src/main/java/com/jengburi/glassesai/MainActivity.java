@@ -32,6 +32,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private EditText keyEdit, modelEdit, promptEdit, triggerEdit, playEdit, nextEdit, prevEdit;
     private Button goBtn, againBtn, voiceBtn, serviceBtn;
     private Button convoBtn, listenBtn;
+    private CheckBox wakeBox;
+    private EditText wakeEdit;
     private EditText uploadUrlEdit, uploadKeyEdit;
     private CheckBox uploadBox;
     private RadioGroup glassesGroup;
@@ -214,6 +216,19 @@ public class MainActivity extends Activity implements AppCore.Ui {
         Button syncBtn = rowButton(urow, "안경 속 파일 전부 올리기");
         syncBtn.setOnClickListener(v -> { saveFields(); core.syncAllToDrive(); });
 
+        // --- 호출어 ---
+        col.addView(section("🗣 말로 부르기 (호출어)"));
+        TextView wh = label("휴대폰이 계속 듣다가 호출어가 들리면 AI가 깨어나요. \"쟁부리야, 오늘 날씨 어때?\"처럼 이어서 말해도 돼요.\n※ 안경 버튼 대기가 켜져 있어야 동작하고, 배터리를 조금 더 써요.");
+        wh.setTextColor(Color.GRAY);
+        col.addView(wh);
+        wakeBox = check(col, "호출어로 부르기 켜기", "wakeOn", false);
+        wakeBox.setOnCheckedChangeListener((v, on) -> {
+            core.prefs.edit().putBoolean("wakeOn", on).apply();
+            if (GlassesService.running) { if (on) core.wakeWord.start(); else core.wakeWord.stop(); }
+        });
+        col.addView(label("호출어"));
+        wakeEdit = edit(col);
+
         // --- 안경 고르기 ---
         col.addView(section("👓 안경 고르기 (S1Pro, M88 등)"));
         TextView gh = label("휴대폰과 블루투스로 페어링된 기기 목록이에요. 쓰실 안경을 고르세요.");
@@ -331,6 +346,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private void loadFields() {
         keyEdit.setText(core.prefs.getString("key", ""));
         uploadUrlEdit.setText(core.prefs.getString("uploadUrl", ""));
+        wakeEdit.setText(core.prefs.getString("wakeWord", "쟁부리야"));
+        loadCheck(wakeBox);
         uploadKeyEdit.setText(core.prefs.getString("uploadKey", ""));
         loadCheck(uploadBox);
         modelEdit.setText(core.models());
@@ -356,6 +373,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         core.prefs.edit()
                 .putString("key", keyEdit.getText().toString().trim())
                 .putString("uploadUrl", uploadUrlEdit.getText().toString().trim())
+                .putString("wakeWord", wakeEdit.getText().toString().trim().isEmpty() ? "쟁부리야" : wakeEdit.getText().toString().trim())
                 .putString("uploadKey", uploadKeyEdit.getText().toString().trim())
                 .putString("model", modelEdit.getText().toString().trim())
                 .putString("customPrompt", promptEdit.getText().toString().trim())

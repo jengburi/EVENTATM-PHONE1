@@ -58,6 +58,7 @@ public class GlassesService extends Service {
         core.log("안경 버튼 대기 시작");
         if (core.prefs.getBoolean("mediaKey", true)) setupMediaButton(core);
         new Thread(this::keepConnected).start();
+        if (core.prefs.getBoolean("wakeOn", false)) core.wakeWord.start();
     }
 
     private void keepConnected() {
@@ -152,6 +153,7 @@ public class GlassesService extends Service {
         stop = true;
         running = false;
         if (session != null) session.release();
+        AppCore.get(this).wakeWord.stop();
         AppCore.get(this).log("안경 버튼 대기 종료");
         super.onDestroy();
     }
