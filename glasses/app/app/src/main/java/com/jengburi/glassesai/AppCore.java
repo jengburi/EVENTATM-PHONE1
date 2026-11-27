@@ -22,7 +22,8 @@ public class AppCore {
     }
 
     static final String COMMON_TAIL = "\n귀로 듣는 답이니 기호, 표, 마크다운 없이 말하듯이 짧게 한국어로 써 줘.";
-    public static final String[] MODE_NAMES = {"자동", "번역", "문제 풀이", "설명", "쟁부리우드 제품", "직접 입력"};
+    public static final String[] MODE_NAMES = {"자동", "번역", "문제 풀이", "설명", "쟁부리우드 제품", "칼로리 경찰", "냉장고 셰프", "가격 감별사", "동물 속마음", "코디 평가", "직접 입력"};
+    public static final int M_KCAL = 5, M_CHEF = 6, M_PRICE = 7, M_PET = 8, M_STYLE = 9;
     static final String[] MODE_PROMPTS = {
             "이 사진은 내가 쓴 안경 카메라로 방금 찍은 거야.\n"
                     + "- 메뉴판, 표지판 같은 글자가 있으면 한국어로 번역해서 읽어 줘.\n"
@@ -32,6 +33,14 @@ public class AppCore {
             "사진 속 문제를 풀어 줘. 문제 번호마다 정답 번호와 한두 문장 풀이를 알려 줘.",
             "사진에 보이는 것을 앞이 잘 안 보이는 사람에게 설명하듯 3~4문장으로 자세히 설명해 줘.",
             "나는 원목 맞춤 제작 공방 '쟁부리우드'를 운영해. 사진 속 물건이나 공간을 보고, 어떤 원목 제품(포토존, 가구, 소품)을 만들어 주면 좋을지 아이디어 2~3개와 대략의 크기를 말해 줘.",
+            "사진 속 음식을 보고 음식 이름과 대략의 칼로리를 알려 줘. 오늘 먹은 양을 생각해서 친구처럼 짧게 칭찬이나 잔소리 한마디 해 줘. "
+                    + "맨 마지막 줄에 이번 음식의 칼로리 숫자만 [칼로리:650] 형식으로 적어 줘. 음식이 아니면 [칼로리:0].",
+            "사진은 냉장고 안이나 식재료야. 보이는 재료를 짧게 말하고, 그 재료로 만들 수 있는 요리 1~2개를 추천해 줘. "
+                    + "첫 번째 요리는 필요한 재료와 만드는 순서를 3~5단계로 말하듯이 알려 줘.",
+            "사진 속 물건이 뭔지 알아보고 한국에서 보통 얼마쯤 하는지(인터넷 최저가 기준 대략) 알려 줘. "
+                    + "가격표가 보이면 그 가격이 싼 편인지 비싼 편인지 판단해 줘. 정확하지 않을 수 있다는 말은 짧게만.",
+            "사진 속 동물(동물이 없으면 사물)의 지금 속마음을 1인칭으로 웃기게 2~3문장 말해 줘. 표정과 자세를 근거로, 예능 자막처럼.",
+            "사진 속 사람(거울 셀카 포함)의 옷차림을 패션 코치처럼 100점 만점으로 점수 매기고, 잘한 점 하나, 아쉬운 점 하나, 팁 하나를 말해 줘. 기분 나쁘지 않게 유쾌하게.",
             ""
     };
     /** 버튼에 붙일 수 있는 특수 동작 */
@@ -69,7 +78,15 @@ public class AppCore {
         interp = new Interpreter(this);
         ble.preferredAddress = prefs.getString("glassesAddr", "");
         wakeWord = new WakeWord(this);
+        features = new Features(this);
+        // 예전 버전의 '직접 입력'(5번) 선택 유지
+        if (prefs.getInt("modeVer", 1) < 2) {
+            if (prefs.getInt("mode", 0) == 5) prefs.edit().putInt("mode", MODE_NAMES.length - 1).apply();
+            prefs.edit().putInt("modeVer", 2).apply();
+        }
     }
+
+    public final Features features;
 
     public final WakeWord wakeWord;
     /** 지금 마이크 소리 크기 (화면 표시용) */
@@ -273,6 +290,7 @@ public class AppCore {
     public String prompt(int m) {
         if (m < 0 || m >= MODE_PROMPTS.length) m = mode();
         String p = (m == MODE_PROMPTS.length - 1) ? prefs.getString("customPrompt", MODE_PROMPTS[0]) : MODE_PROMPTS[m];
+        if (m == M_KCAL) p += "\n(참고: " + features.kcalContext() + ")";
         return p + COMMON_TAIL;
     }
     public String key() { return prefs.getString("key", "").trim(); }
@@ -303,9 +321,13 @@ public class AppCore {
             + "질문을 다시 적지 말고 바로 답해. 사용자가 '없어', '그만', '끝' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.";
 
     /** "번역", "1", "다시듣기", "말로만" 같은 이름을 동작 번호로. */
+    /** 버튼·화면 카드로 바로 실행하는 재미 기능 */
+    public static final String[] FEATURE_KEYS = {"주차", "내차", "위치", "일기", "팩트", "회의", "길안내"};
+
     static int parseAction(String s) {
         s = s.trim();
         if (s.isEmpty()) return ACT_CURRENT;
+        for (int i = 0; i < FEATURE_KEYS.length; i++) if (s.contains(FEATURE_KEYS[i])) return -100 - i;
         if (s.contains("다시")) return ACT_REPLAY;
         if (s.contains("듣기") || s.contains("뉴스")) return ACT_LISTEN;
         if (s.contains("통역")) return ACT_INTERPRET;
@@ -346,7 +368,9 @@ public class AppCore {
 
     /** 버튼에 따라 알맞은 동작 실행. */
     public void action(String source, int act) {
+        if (features.meetingOn) { features.stopMeeting(); return; }
         if (interp.running) { interp.stop(); return; }
+        if (act <= -100) { feature(FEATURE_KEYS[-100 - act]); return; }
         if (act == ACT_INTERPRET) { interp.start(false); return; }
         if (act == ACT_LISTEN) { interp.start(true); return; }
         if ((speaking || isSpeaking()) && act != ACT_REPLAY) { stopSpeaking(); log("읽기 멈춤"); return; }
@@ -357,6 +381,58 @@ public class AppCore {
     }
 
     public void trigger(String source) { trigger(source, ACT_CURRENT); }
+
+    /** 기능 이름으로 실행 (화면 카드 · 안경 버튼 공용) */
+    public void feature(String k) {
+        switch (k) {
+            case "주차": runTask("주차 기억", features::saveParking, false); break;
+            case "내차": runTask("내 차 찾기", features::findCar, true); break;
+            case "위치": runTask("내 위치", features::whereAmI, true); break;
+            case "일기": runTask("오늘 일기", features::diary, false); break;
+            case "팩트": runTask("팩트 체크", features::factCheck, true); break;
+            case "회의": if (features.meetingOn) features.stopMeeting(); else features.startMeeting(); break;
+            case "길안내": runTask("길안내", this::navAsk, false); break;
+        }
+    }
+
+    /** 목적지를 말로 듣고 지도 열기 */
+    private String navAsk() throws Exception {
+        sayAndWait("어디로 갈까요?", 4);
+        byte[] wav = AudioQ.record(ctx, glassesMic(), 8, 12, this::log);
+        if (wav == null) return "못 들었어요.";
+        String r = askModel("첨부 오디오에서 사용자가 가고 싶은 목적지와 이동 방법을 알아내서 [길안내:목적지:방법] 형식 한 줄로만 답해. "
+                + "방법은 도보, 자동차, 대중교통 중 하나(모르면 도보). 근처 장소 찾기면 [주변:검색어].", null, wav);
+        String sp = specialTag(r);
+        return sp != null ? sp : "목적지를 알아듣지 못했어요.";
+    }
+
+    /** 오래 걸리는 기능을 뒤에서 실행하고 결과를 읽어 줌 */
+    public void runTask(String name, java.util.concurrent.Callable<String> job, boolean save) {
+        if (busy) { log("다른 작업 중이에요"); return; }
+        if (key().isEmpty() && !name.contains("위치") && !name.contains("내 차")) { say("먼저 앱에 제미나이 API 키를 넣어 주세요"); return; }
+        setBusy(true);
+        log("▶ " + name);
+        new Thread(() -> {
+            try {
+                answer(name + " 중…");
+                String r = job.call();
+                if (r != null && !r.isEmpty()) {
+                    answer(r);
+                    speakQueued(r, Locale.KOREAN);
+                    if (save) History.save(ctx, null, name, null, r, false);
+                    Ui u = ui; if (u != null) u.onHistoryChanged();
+                    waitSpeechDoneQuiet(120);
+                }
+            } catch (Exception e) { fail(e); }
+            finally { setBusy(false); }
+        }).start();
+    }
+
+    private void waitSpeechDoneQuiet(int sec) {
+        long end = System.currentTimeMillis() + sec * 1000L;
+        try { Thread.sleep(400); } catch (InterruptedException ignored) { }
+        while (System.currentTimeMillis() < end && isSpeaking()) { try { Thread.sleep(200); } catch (InterruptedException ignored) { } }
+    }
 
     /** 찍고 → 받고 → 묻고 → 읽기. modeOverride 가 0 이상이면 그 모드로. */
     public synchronized void trigger(String source, int modeOverride) {
@@ -386,6 +462,12 @@ public class AppCore {
             + "사용자가 '없어', '그만', '끝', '됐어' 같은 뜻으로 말했다면 다른 말 없이 [끝] 이라고만 답해.\n"
             + "사용자가 외국인과의 대화를 통역해 달라고 하면(예: 영어 통역해 줘, 이 사람 말 통역해 줘) 다른 말 없이 [통역:언어] 라고만 답해. 언어를 모르면 [통역:자동].\n"
             + "사용자가 뉴스, 방송, 강의, 영상처럼 계속 나오는 말을 통역해 달라고 하거나 '지금 뉴스야' 같이 말하면 다른 말 없이 [듣기통역] 이라고만 답해. 요약해 달라고 하면 [듣기통역:요약].\n"
+            + "사진이 필요한데 특별한 종류면 [사진] 대신: 음식 칼로리는 [사진:칼로리], 냉장고·재료로 요리 추천은 [사진:셰프], 물건 가격이 싼지 비싼지는 [사진:가격], 동물 속마음은 [사진:속마음], 옷차림 평가는 [사진:코디].\n"
+            + "길안내를 원하면(예: 서울역 가는 길 알려 줘) [길안내:목적지:도보] 처럼 답해. 방법은 도보, 자동차, 대중교통 중 하나(운전·차 얘기면 자동차, 모르면 도보).\n"
+            + "지금 내 위치를 물으면 [위치], 근처 장소를 찾으면(예: 근처 편의점 어디야) [주변:편의점].\n"
+            + "주차했다고 하거나 주차 위치 기억해 달라고 하면 [주차], 내 차 어디 있냐고 하면 [내차].\n"
+            + "오늘 일기를 써 달라고 하면 [일기]. TV나 들리는 말이 사실인지 확인해 달라고 하면 [팩트체크]. 회의 기록이나 회의 녹음을 시작해 달라고 하면 [회의].\n"
+            + "위 대괄호 신호로 답할 때는 다른 말 없이 신호만 써.\n"
             + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
 
     /** 그냥 물어보기: 말로 묻고, 앞을 봐야 하는 질문이면 자동으로 찍어서 대답. 이어서 대화 가능. */
@@ -412,6 +494,7 @@ public class AppCore {
                     } else log("질문: " + qText);
                     answer("생각 중…");
                     String prompt = (qText == null ? SMART_PROMPT : SMART_PROMPT.replace("사용자가 음성으로 질문했어(첨부된 오디오).", "사용자 질문: " + qText)) + COMMON_TAIL;
+                    prompt += "\n(참고: 음식 기록 - " + features.kcalContext() + " 오늘 먹은 양을 물으면 이걸로 답해.)";
                     if (ble.battery >= 0) prompt += "\n(참고: 지금 안경 배터리는 " + ble.battery + "%" + (ble.charging ? ", 충전 중" : "") + ". 배터리를 물어보면 이 값으로 답해.)";
                     if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
                     if (photoForChat != null) prompt += "\n\n(앞서 찍은 사진이 함께 첨부돼 있어. 사진 관련 질문이면 이 사진을 보고 답해.)";
@@ -427,21 +510,28 @@ public class AppCore {
                         prefs.edit().putString("interpLang", code == null ? "자동" : Interpreter.nameOf(code)).apply();
                         pendingInterp = 1; return;
                     }
-                    if (a.contains("[사진]") && !ble.canFetchPhoto()) {
+                    String special = specialTag(a);
+                    if (special != null) {
+                        if (special.equals("@meeting")) { pendingInterp = 3; return; }
+                        a = special;
+                        speakQueued(a, Locale.KOREAN);
+                    } else if (a.contains("[사진") && !ble.canFetchPhoto()) {
                         a = "이 안경은 아직 사진을 휴대폰으로 가져올 수 없어서, 보는 질문에는 답하기 어려워요. 다른 건 물어보세요.";
                         speakQueued(a, Locale.KOREAN);
-                    } else if (a.contains("[사진]")) {
+                    } else if (a.contains("[사진")) {
+                        int pm = photoMode(a);
                         say("잠깐만요, 볼게요");
                         byte[] jpeg = capturePhoto();
                         photoForChat = jpeg;
                         newPhoto = jpeg;
                         log("인터넷 연결 기다리는 중…");
                         if (!wifi.waitForInternet(25)) log("인터넷 확인이 안 됐지만 시도해 볼게요");
-                        String p2 = prompt(mode()) + (qText == null
+                        String p2 = prompt(pm) + (qText == null
                                 ? "\n\n사용자가 음성으로 질문했어(첨부된 오디오). 사진을 보고 그 질문에 먼저 답해 줘. 질문을 다시 적지 마."
                                 : "\n\n사용자 질문: " + qText + "\n사진을 보고 이 질문에 먼저 답해 줘.");
                         if (past.length() > 0) p2 += "\n\n지금까지 대화:\n" + past;
                         a = askSpoken(p2, jpeg, wav).replace("[사진]", "").trim();
+                        a = features.takeKcal(a);
                     }
                     answer(a);
                     History.save(ctx, newPhoto, "그냥 물어보기", qText != null ? qText : "(음성 질문)", a, toGallery());
@@ -457,11 +547,44 @@ public class AppCore {
                 int pi = pendingInterp; pendingInterp = 0;
                 if (pi == 1) interp.start(false);
                 else if (pi == 2) interp.start(true);
+                else if (pi == 3) features.startMeeting();
             }
         }).start();
     }
 
     private volatile int pendingInterp;
+
+    /** [사진:칼로리] 같은 신호 → 모드 번호 (없으면 현재 모드) */
+    int photoMode(String a) {
+        if (a.contains("[사진:칼로리")) return M_KCAL;
+        if (a.contains("[사진:셰프")) return M_CHEF;
+        if (a.contains("[사진:가격")) return M_PRICE;
+        if (a.contains("[사진:속마음")) return M_PET;
+        if (a.contains("[사진:코디")) return M_STYLE;
+        return mode();
+    }
+
+    static String tagArg(String a, String tag, int idx) {
+        int s = a.indexOf("[" + tag);
+        if (s < 0) return null;
+        int e = a.indexOf(']', s);
+        String body = a.substring(s + 1, e < 0 ? a.length() : e);
+        String[] p = body.split("[:：]");
+        return idx < p.length ? p[idx].trim() : null;
+    }
+
+    /** 길안내·위치·주차·일기 같은 신호를 처리하고 읽을 말을 돌려줌 (해당 없으면 null) */
+    String specialTag(String a) throws Exception {
+        if (a.contains("[길안내")) return features.navigate(tagArg(a, "길안내", 1), tagArg(a, "길안내", 2));
+        if (a.contains("[위치]")) return features.whereAmI();
+        if (a.contains("[주변")) return features.nearby(tagArg(a, "주변", 1));
+        if (a.contains("[주차]")) return features.saveParking();
+        if (a.contains("[내차]")) return features.findCar();
+        if (a.contains("[일기]")) { say("오늘 일기를 써 볼게요"); return features.diary(); }
+        if (a.contains("[팩트체크]")) return features.factCheck();
+        if (a.contains("[회의]")) return "@meeting";
+        return null;
+    }
 
     /** 대답이 만들어지는 대로 문장 단위로 바로 읽어 주는 장치. [사진] 같은 신호는 읽지 않음. */
     class StreamSpeaker implements Gemini.TextSink {
@@ -490,11 +613,15 @@ public class AppCore {
             if (idx < 0) return;
             String sent = t.substring(0, idx + 1).trim();
             spoken += idx + 1;
+            sent = sent.replaceAll("\\[[^\\]]*\\]", "").trim();
             if (sent.length() > 0) speakQueued(sent, Locale.KOREAN);
         }
     }
     static boolean isTag(String t) {
-        return t.startsWith("[사진") || t.startsWith("[끝") || t.startsWith("[통역") || t.startsWith("[듣기통역") || t.startsWith("STOP") || t.startsWith("none");
+        if (t.startsWith("STOP") || t.startsWith("none")) return true;
+        for (String k : new String[]{"[사진", "[끝", "[통역", "[듣기통역", "[길안내", "[위치", "[주변", "[주차", "[내차", "[일기", "[팩트", "[회의"})
+            if (t.startsWith(k)) return true;
+        return false;
     }
 
     /** 스트리밍으로 묻고, 문장이 나오는 대로 읽기 시작. 전체 대답을 돌려줌. */
@@ -577,6 +704,8 @@ public class AppCore {
         return lm != null && lm.isLocationEnabled();
     }
 
+    byte[] capturePhotoPublic() throws Exception { return capturePhoto(); }
+
     /** 안경으로 찍고 사진을 받아 온다 (와이파이 전환 포함). */
     private byte[] capturePhoto() throws Exception {
         ble.connect();
@@ -648,6 +777,7 @@ public class AppCore {
             Gemini.lastFallbackModel = null;
             String a = askSpokenRaw(prompt, jpeg, wav);
             if (a.contains("[끝]")) { say("알겠어요"); return; }
+            a = features.takeKcal(a);
             String fb = Gemini.lastFallbackModel;
             if (fb != null && !models().contains(fb)) prefs.edit().putString("model", fb + ", " + models()).apply();
             answer(a);

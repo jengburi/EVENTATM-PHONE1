@@ -87,24 +87,32 @@ public class Interpreter {
                 if (wav == null) { if (++idle >= 4) { core.say("소리가 없어서 통역을 끝낼게요"); break; } continue; }
                 idle = 0;
                 tgt = targetCode();
+                boolean suggest = core.prefs.getBoolean("interpSuggest", false);
                 String prompt = "너는 전문 통역사야. 첨부 오디오는 대화 중 한 사람의 말이야.\n"
                         + "- 한국어로 말했으면 " + nameOf(tgt) + "(" + tgt + ")로 번역해.\n"
                         + "- 한국어가 아니면 한국어로 번역해.\n"
                         + "- 한국어로 '통역 그만', '통역 끝' 같은 뜻으로 말했으면 STOP 이라고만 답해.\n"
                         + "출력은 딱 한 줄: 원래언어코드|번역언어코드|번역문\n"
                         + "언어 코드는 ko, en, ja, zh, vi, th, fr, es 중에서 골라. 말이 안 들리거나 잡음뿐이면 none 이라고만 답해.\n"
-                        + "번역문은 자연스러운 말투로, 설명이나 따옴표 없이.";
+                        + "번역문은 자연스러운 말투로, 설명이나 따옴표 없이."
+                        + (suggest ? "\n- 외국어를 한국어로 번역한 경우에만 맨 뒤에 |추천 대답 을 붙여: 사용자가 상대에게 바로 할 만한 아주 짧은 대답(한국어). 예: en|ko|어디서 왔어요?|한국에서 왔다고 하세요" : "");
                 String r = core.askModel(prompt, null, wav).trim();
                 if (r.contains("STOP")) { core.say("통역을 끝낼게요"); break; }
                 if (r.startsWith("none") || !r.contains("|")) continue;
-                String[] p = r.split("\\|", 3);
+                String[] p = r.split("\\|", 4);
                 if (p.length < 3 || p[2].trim().isEmpty()) continue;
                 String src = p[0].trim(), dst = p[1].trim(), text = p[2].trim();
                 if (!src.equals("ko") && !src.equals("none")) lastForeign = src;
                 core.answer("[" + nameOf(src) + " → " + nameOf(dst) + "]\n" + text);
                 History.save(core.ctx, null, "대화 통역", nameOf(src) + "→" + nameOf(dst), text, false);
                 if (core.ui != null) core.ui.onHistoryChanged();
-                if (dst.equals("ko")) core.speakAndWait(text, Locale.KOREAN, false);
+                if (dst.equals("ko")) {
+                    core.speakAndWait(text, Locale.KOREAN, false);
+                    if (suggest && p.length > 3 && !p[3].trim().isEmpty()) {
+                        core.answer("[" + nameOf(src) + " → 한국어]\n" + text + "\n💡 " + p[3].trim());
+                        core.speakAndWait("추천 대답. " + p[3].trim(), Locale.KOREAN, false);
+                    }
+                }
                 else core.speakAndWait(text, locale(dst), phoneSpeaker);
             }
         } catch (Exception e) {
