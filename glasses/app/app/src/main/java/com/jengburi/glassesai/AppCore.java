@@ -392,6 +392,7 @@ public class AppCore {
                     if (wav == null) { if (turn == 0) say("못 들었어요"); return; }
                     answer("생각 중…");
                     String prompt = SMART_PROMPT + COMMON_TAIL;
+                    if (ble.battery >= 0) prompt += "\n(참고: 지금 안경 배터리는 " + ble.battery + "%" + (ble.charging ? ", 충전 중" : "") + ". 배터리를 물어보면 이 값으로 답해.)";
                     if (past.length() > 0) prompt += "\n\n지금까지 대화:\n" + past;
                     if (photoForChat != null) prompt += "\n\n(앞서 찍은 사진이 함께 첨부돼 있어. 사진 관련 질문이면 이 사진을 보고 답해.)";
                     byte[] newPhoto = null;

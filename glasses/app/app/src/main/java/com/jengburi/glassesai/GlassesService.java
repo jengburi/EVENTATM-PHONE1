@@ -62,14 +62,35 @@ public class GlassesService extends Service {
 
     private void keepConnected() {
         AppCore core = AppCore.get(this);
+        int tick = 0, lastShown = -2;
+        boolean warned = false;
         while (!stop) {
             try {
                 if (!core.ble.isConnected() && !core.busy) core.ble.connect();
+                if (core.ble.isConnected() && !core.busy && tick % 6 == 0) core.ble.requestBattery(); // 1분마다
             } catch (Exception e) {
                 core.log("안경 연결 대기: " + e.getMessage());
             }
+            int b = core.ble.battery;
+            if (b != lastShown) { lastShown = b; updateNotification(b, core.ble.charging); }
+            if (b >= 0 && b <= 15 && !core.ble.charging && !warned && !core.busy) { warned = true; core.say("안경 배터리가 " + b + "퍼센트 남았어요"); }
+            if (b > 20 || core.ble.charging) warned = false;
+            tick++;
             try { Thread.sleep(10000); } catch (InterruptedException ignored) { }
         }
+    }
+
+    private void updateNotification(int battery, boolean charging) {
+        try {
+            String bt = battery < 0 ? "" : " · 🔋" + battery + "%" + (charging ? " 충전 중" : "");
+            PendingIntent pi = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+            Notification n = new Notification.Builder(this, CH)
+                    .setContentTitle("안경 AI 대기 중" + bt)
+                    .setContentText("안경 버튼을 누르면 찍고 설명해 줘요")
+                    .setSmallIcon(android.R.drawable.ic_menu_camera)
+                    .setContentIntent(pi).setOngoing(true).setOnlyAlertOnce(true).build();
+            getSystemService(NotificationManager.class).notify(1, n);
+        } catch (Exception ignored) { }
     }
 
     private void setupMediaButton(AppCore core) {

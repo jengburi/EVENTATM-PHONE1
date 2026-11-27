@@ -80,9 +80,14 @@ public class MainActivity extends Activity implements AppCore.Ui {
         scroll.addView(col);
 
         TextView title = new TextView(this);
-        title.setText("안경 AI (S1Pro + Gemini)");
+        title.setText("안경 AI (S1Pro · M88 + Gemini)");
         title.setTextSize(22);
         col.addView(title);
+        batteryView = new TextView(this);
+        batteryView.setTextSize(16);
+        batteryView.setOnClickListener(v -> new Thread(core.ble::requestBattery).start());
+        col.addView(batteryView);
+        batteryView.post(batteryTick);
 
         voiceBtn = bigButton(col, "🎤  그냥 물어보기\n(앞을 봐야 하면 알아서 찍어요)", 96);
         voiceBtn.setOnClickListener(v -> { saveFields(); core.smartAsk("화면 버튼"); });
@@ -312,6 +317,16 @@ public class MainActivity extends Activity implements AppCore.Ui {
         Object[] t = (Object[]) c.getTag();
         c.setChecked(core.prefs.getBoolean((String) t[0], (Boolean) t[1]));
     }
+
+    private TextView batteryView;
+    private final Runnable batteryTick = new Runnable() {
+        @Override public void run() {
+            int b = core.ble.battery;
+            String conn = core.ble.isConnected() ? (core.ble.jianyun ? "M88 연결됨" : "S1Pro 연결됨") : "안경 연결 안 됨";
+            batteryView.setText(conn + (b >= 0 ? "  ·  🔋 " + b + "%" + (core.ble.charging ? " (충전 중)" : "") : "  ·  🔋 확인 중 (누르면 새로고침)"));
+            batteryView.postDelayed(this, 2000);
+        }
+    };
 
     private void loadFields() {
         keyEdit.setText(core.prefs.getString("key", ""));

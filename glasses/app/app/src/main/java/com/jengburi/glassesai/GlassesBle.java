@@ -306,7 +306,43 @@ public class GlassesBle {
         }
     };
 
+    /** 안경 배터리 % (-1 = 아직 모름), 충전 중 여부 */
+    public volatile int battery = -1;
+    public volatile boolean charging;
+
+    private void parseBattery(byte[] v) {
+        try {
+            if (jianyun) {
+                // M88: 0b PP [충전]
+                if (v.length >= 2 && v[0] == 0x0b) {
+                    int b = v[1] & 0xFF;
+                    if (b <= 100) { battery = b; charging = v.length > 2 && v[2] == 1; }
+                }
+            } else if (v.length >= 7 && (v[0] & 0xFF) == 0xAC) {
+                int cmd = v[4] & 0xFF;
+                if (cmd == 0x17 && v.length >= 8) {
+                    // S1Pro: 숫자 두 글자(ASCII) + 충전 표시
+                    int d1 = v[5] - '0', d2 = v[6] - '0';
+                    if (d1 >= 0 && d1 <= 9 && d2 >= 0 && d2 <= 9) { battery = d1 * 10 + d2; charging = v[7] == 1; }
+                    else if ((v[5] & 0xFF) <= 100) battery = v[5] & 0xFF;
+                } else if (cmd == 0x53) {
+                    int b = v[6] & 0xFF;
+                    if (b <= 100) battery = b;
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** 배터리 물어보기 (응답은 알림으로 와서 battery 에 저장됨) */
+    public void requestBattery() {
+        try {
+            if (!isConnected()) return;
+            if (jianyun) sendBase(p20(0x0b)); else send(packet(0x17, 0x00));
+        } catch (Exception ignored) { }
+    }
+
     private void deliver(byte[] v) {
+        parseBattery(v);
         // 음성 데이터(0x46)는 양이 많아서 큐에는 넣지 않음
         boolean audio = (v.length > 4 && (v[4] & 0xFF) == 0x46) || (jianyun && v.length > 60 && v[0] == 0x02);
         if (!audio) packets.offer(v);
