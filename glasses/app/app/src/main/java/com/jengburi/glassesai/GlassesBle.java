@@ -230,6 +230,22 @@ public class GlassesBle {
 
     public void clearPackets() { packets.clear(); }
 
+    /** 영상 녹화 중인지 (앱이 보낸 명령 기준) */
+    public volatile boolean recording;
+
+    /** 안경으로 영상 녹화 시작 (현재 M88만) */
+    public void startVideo() throws Exception {
+        if (!jianyun) throw new Exception("S1Pro 영상 찍기 신호는 아직 분석 전이에요 (M88만 돼요)");
+        send(jyPacket(0x0a, 0x03));
+        recording = true;
+    }
+
+    public void stopVideo() throws Exception {
+        if (!jianyun) throw new Exception("S1Pro 영상 찍기는 아직 지원하지 않아요");
+        send(jyPacket(0x0a, 0x04));
+        recording = false;
+    }
+
     public void takePhoto() throws Exception {
         clearPackets();
         if (jianyun) {

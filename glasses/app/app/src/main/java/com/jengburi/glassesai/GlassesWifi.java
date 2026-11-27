@@ -173,6 +173,19 @@ public class GlassesWifi {
             return best;
         }
     }
+    /** 안경에 있는 가장 최근 동영상 (.mp4) */
+    public String latestVideoFtp() throws Exception {
+        try (Ftp f = openFtp()) {
+            String best = null;
+            for (String n : f.list()) {
+                if (!n.toLowerCase().endsWith(".mp4")) continue;
+                if (best == null || n.compareTo(best) > 0) best = n;
+            }
+            log.log(best != null ? "최근 영상: " + best : "안경에 영상이 없어요");
+            return best;
+        }
+    }
+
     public byte[] downloadFtp(String name) throws Exception {
         try (Ftp f = openFtp()) {
             byte[] b = f.retr(name);

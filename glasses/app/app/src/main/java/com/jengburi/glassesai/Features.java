@@ -208,6 +208,61 @@ public class Features {
         return msg;
     }
 
+    // ================= 사진만 / 영상 =================
+
+    /** AI 설명 없이 사진만 찍어서 갤러리에 저장 */
+    String photoOnly() throws Exception {
+        byte[] jpeg = core.capturePhotoPublic();
+        History.save(core.ctx, jpeg, "사진", null, "사진 저장", true);
+        if (core.ui != null) core.ui.onHistoryChanged();
+        return "사진을 갤러리에 저장했어요";
+    }
+
+    /** 안경에서 가장 최근 영상을 받아 휴대폰 갤러리(Movies/GlassesAI)에 저장 */
+    String fetchVideo() throws Exception {
+        if (!core.ble.jianyun) return "이 안경은 아직 영상 가져오기를 지원하지 않아요";
+        core.ble.connect();
+        String ssid = core.ble.wifiOn();
+        java.io.File tmp = new java.io.File(core.ctx.getCacheDir(), "glasses_video.mp4");
+        String name;
+        try {
+            Thread.sleep(1500);
+            core.wifi.connect(ssid);
+            name = core.wifi.latestVideoFtp();
+            if (name == null) return "안경에서 영상을 찾지 못했어요";
+            core.log("영상 받는 중… (길면 시간이 걸려요)");
+            core.wifi.downloadFtpTo(name, tmp);
+        } finally {
+            core.wifi.disconnect();
+            core.ble.transferEnd();
+        }
+        long kb = tmp.length() / 1024;
+        android.content.ContentValues v = new android.content.ContentValues();
+        v.put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "glasses_" + name);
+        v.put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+        v.put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/GlassesAI");
+        android.net.Uri u = core.ctx.getContentResolver().insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v);
+        if (u == null) throw new Exception("갤러리에 저장하지 못했어요");
+        try (java.io.OutputStream o = core.ctx.getContentResolver().openOutputStream(u);
+             java.io.InputStream in = new java.io.FileInputStream(tmp)) {
+            byte[] buf = new byte[64 * 1024]; int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+        }
+        // 전체 버전: 20MB 이하면 드라이브에도
+        if (BuildConfig.FULL && core.uploadReady() && tmp.length() < 20L * 1024 * 1024) {
+            try {
+                core.wifi.waitForInternet(30);
+                byte[] all = java.nio.file.Files.readAllBytes(tmp.toPath());
+                Uploader.upload(core.prefs.getString("uploadUrl", "").trim(), core.prefs.getString("uploadKey", "").trim(),
+                        "glasses_" + name, "video/mp4", all, null);
+                core.log("드라이브에 영상 올림");
+            } catch (Exception e) { core.log("영상 드라이브 업로드 실패: " + e.getMessage()); }
+        }
+        tmp.delete();
+        History.save(core.ctx, null, "영상", null, "영상 저장: " + name + " (" + kb / 1024 + "MB) → 갤러리 Movies/GlassesAI", false);
+        return "영상을 갤러리에 저장했어요";
+    }
+
     // ================= 칼로리 =================
 
     static String today() { return new SimpleDateFormat("yyyyMMdd", Locale.KOREA).format(new Date()); }

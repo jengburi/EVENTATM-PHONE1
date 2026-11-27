@@ -55,7 +55,8 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private RadioGroup glassesGroup;
     private final List<String[]> glassesList = new ArrayList<>();
 
-    private View askBtn, photoBtn, convoBtn, listenBtn, meetBtn, againBtn;
+    private View askBtn, photoBtn, convoBtn, listenBtn, meetBtn, againBtn, shotBtn, videoBtn;
+    private TextView videoLabel;
     private TextView convoLabel, listenLabel, meetLabel, serviceBtn, statusConn, statusSub, kcalView;
     private ImageView photo;
     private TextView answer, logView, keyStatus, remoteStatus, signalView;
@@ -213,6 +214,12 @@ public class MainActivity extends Activity implements AppCore.Ui {
         meetBtn = tile(g2, "🎙", "회의 기록", null, RED);
         meetLabel = (TextView) ((LinearLayout) meetBtn).getChildAt(1);
         meetBtn.setOnClickListener(v -> core.feature("회의"));
+        LinearLayout g3 = gridRow(col);
+        shotBtn = tile(g3, "📷", "사진만 찍기", null, BLUE);
+        shotBtn.setOnClickListener(v -> core.feature("사진만"));
+        videoBtn = tile(g3, "🎥", "영상 찍기", null, ACC);
+        videoLabel = (TextView) ((LinearLayout) videoBtn).getChildAt(1);
+        videoBtn.setOnClickListener(v -> core.feature("영상"));
 
         LinearLayout small = new LinearLayout(this);
         small.setPadding(0, dp(4), 0, dp(4));
@@ -419,6 +426,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         geminiEarBox = sw(s4, "Gemini가 목소리를 직접 듣기 (추천)", "geminiListen", true);
         glassesMicBox = sw(s4, "안경 마이크 사용 (끄면 휴대폰 마이크)", "glassesMic", true);
         galleryBox = sw(s4, "찍은 사진을 갤러리에도 저장", "gallery", true);
+        sw(s4, "영상 녹화가 끝나면 휴대폰 갤러리로 가져오기 (M88)", "videoFetch", true);
         s4.addView(label("읽는 속도"));
         rateChips = new Chips(s4, RATE_NAMES, 4, i -> core.prefs.edit().putFloat("rate", RATES[i]).apply());
         s4.addView(label("'찍고 설명' 기본 모드"));
@@ -565,6 +573,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
             statusConn.setText(conn + bat);
             statusConn.setTextColor(core.ble.isConnected() ? TXT : SUB);
             StringBuilder s = new StringBuilder();
+            if (core.ble.recording) s.append("🔴 영상 녹화 중  ");
             if (core.features.meetingOn) s.append("🎙 회의 기록 중  ");
             else if (core.interp.running) s.append(core.interp.listenMode ? "📺 듣기 통역 중  " : "🗣 대화 통역 중  ");
             else if (core.busy) s.append("⏳ 작업 중…  ");
@@ -576,6 +585,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
             if (s.length() == 0) s.append(GlassesService.running ? "안경 버튼을 누르거나 아래 버튼을 눌러 보세요" : "오른쪽 버튼으로 안경 대기를 켜 주세요");
             statusSub.setText(s.toString().trim());
             meetLabel.setText(core.features.meetingOn ? "회의 끝내기" : "회의 기록");
+            videoLabel.setText(core.ble.recording ? "■ 녹화 끝내기" : "영상 찍기");
             if (signalView != null && !RemoteKeys.lastSignal.isEmpty() && RemoteService.running) signalView.setText("📡 들어온 신호: " + RemoteKeys.lastSignal);
             meetBtn.setEnabled(!core.busy || core.features.meetingOn);
             meetBtn.setAlpha(meetBtn.isEnabled() ? 1f : 0.4f);
@@ -1124,7 +1134,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     @Override public void onBusy(boolean b) {
         runOnUiThread(() -> {
             boolean ir = core.interp.running;
-            for (View v : new View[]{askBtn, photoBtn, againBtn}) { v.setEnabled(!b); v.setAlpha(b ? 0.4f : 1f); }
+            for (View v : new View[]{askBtn, photoBtn, againBtn, shotBtn}) { v.setEnabled(!b); v.setAlpha(b ? 0.4f : 1f); }
             convoBtn.setEnabled(!b || ir); listenBtn.setEnabled(!b || ir);
             convoBtn.setAlpha(convoBtn.isEnabled() ? 1f : 0.4f); listenBtn.setAlpha(listenBtn.isEnabled() ? 1f : 0.4f);
             convoLabel.setText(ir && !core.interp.listenMode ? "통역 끝내기" : "대화 통역");

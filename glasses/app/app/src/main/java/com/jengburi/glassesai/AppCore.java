@@ -323,7 +323,7 @@ public class AppCore {
 
     /** "번역", "1", "다시듣기", "말로만" 같은 이름을 동작 번호로. */
     /** 버튼·화면 카드로 바로 실행하는 재미 기능 */
-    public static final String[] FEATURE_KEYS = {"주차", "내차", "위치", "일기", "팩트", "회의", "길안내"};
+    public static final String[] FEATURE_KEYS = {"주차", "내차", "위치", "일기", "팩트", "회의", "길안내", "영상", "사진만"};
 
     static int parseAction(String s) {
         s = s.trim();
@@ -393,6 +393,33 @@ public class AppCore {
             case "팩트": runTask("팩트 체크", features::factCheck, true); break;
             case "회의": if (features.meetingOn) features.stopMeeting(); else features.startMeeting(); break;
             case "길안내": runTask("길안내", this::navAsk, false); break;
+            case "영상": toggleVideo(); break;
+            case "사진만": runTask("사진 찍기", features::photoOnly, false); break;
+        }
+    }
+
+    /** 영상 녹화 시작/끝 (끝나면 휴대폰 갤러리로 가져오기) */
+    public void toggleVideo() {
+        if (!ble.recording) {
+            if (busy) { log("다른 작업 중이에요"); return; }
+            new Thread(() -> {
+                try {
+                    ble.connect();
+                    ble.startVideo();
+                    log("🎥 영상 녹화 시작");
+                    say("녹화를 시작할게요. 끝낼 때 다시 누르세요");
+                    Ui u = ui; if (u != null) u.onBusy(busy);
+                } catch (Exception e) { log("영상 시작 실패: " + e.getMessage()); say(e.getMessage()); }
+            }).start();
+        } else {
+            new Thread(() -> {
+                try { ble.stopVideo(); log("■ 영상 녹화 끝"); } catch (Exception e) { log("영상 끝내기 실패: " + e.getMessage()); }
+                Ui u = ui; if (u != null) u.onBusy(busy);
+                if (prefs.getBoolean("videoFetch", true)) {
+                    try { Thread.sleep(2500); } catch (InterruptedException ignored) { } // 안경이 파일을 저장할 시간
+                    runTask("영상 가져오기", features::fetchVideo, false);
+                } else say("녹화를 끝냈어요. 영상은 안경에 저장돼 있어요");
+            }).start();
         }
     }
 
@@ -467,6 +494,7 @@ public class AppCore {
             + "길안내를 원하면(예: 서울역 가는 길 알려 줘) [길안내:목적지:도보] 처럼 답해. 방법은 도보, 자동차, 대중교통 중 하나(운전·차 얘기면 자동차, 모르면 도보).\n"
             + "지금 내 위치를 물으면 [위치], 근처 장소를 찾으면(예: 근처 편의점 어디야) [주변:편의점].\n"
             + "주차했다고 하거나 주차 위치 기억해 달라고 하면 [주차], 내 차 어디 있냐고 하면 [내차].\n"
+            + "영상(동영상) 찍어 달라거나 녹화 시작이면 [영상시작], 녹화 그만·영상 끝이면 [영상끝]. 설명 없이 사진만 찍어 두라고 하면 [사진저장].\n"
             + "오늘 일기를 써 달라고 하면 [일기]. TV나 들리는 말이 사실인지 확인해 달라고 하면 [팩트체크]. 회의 기록이나 회의 녹음을 시작해 달라고 하면 [회의].\n"
             + "위 대괄호 신호로 답할 때는 다른 말 없이 신호만 써.\n"
             + "그 외에는 질문에 바로 답해. 질문을 다시 적지 마.";
@@ -549,11 +577,13 @@ public class AppCore {
                 if (pi == 1) interp.start(false);
                 else if (pi == 2) interp.start(true);
                 else if (pi == 3) features.startMeeting();
+                if (pendingVideo) { pendingVideo = false; toggleVideo(); }
             }
         }).start();
     }
 
     private volatile int pendingInterp;
+    private volatile boolean pendingVideo;
 
     /** [사진:칼로리] 같은 신호 → 모드 번호 (없으면 현재 모드) */
     int photoMode(String a) {
@@ -585,6 +615,12 @@ public class AppCore {
         if (a.contains("[일기]")) { say("오늘 일기를 써 볼게요"); return features.diary(); }
         if (a.contains("[팩트체크]")) return features.factCheck();
         if (a.contains("[회의]")) return "@meeting";
+        if (a.contains("[영상시작]") || a.contains("[영상끝]")) {
+            boolean wantStart = a.contains("[영상시작]");
+            if (wantStart != ble.recording) pendingVideo = true;
+            return wantStart ? "녹화를 시작할게요" : "녹화를 끝낼게요";
+        }
+        if (a.contains("[사진저장]")) return features.photoOnly();
         return null;
     }
 
@@ -621,7 +657,7 @@ public class AppCore {
     }
     static boolean isTag(String t) {
         if (t.startsWith("STOP") || t.startsWith("none")) return true;
-        for (String k : new String[]{"[사진", "[끝", "[통역", "[듣기통역", "[길안내", "[위치", "[주변", "[주차", "[내차", "[일기", "[팩트", "[회의"})
+        for (String k : new String[]{"[사진", "[끝", "[통역", "[듣기통역", "[길안내", "[위치", "[주변", "[주차", "[내차", "[일기", "[팩트", "[회의", "[영상"})
             if (t.startsWith(k)) return true;
         return false;
     }
