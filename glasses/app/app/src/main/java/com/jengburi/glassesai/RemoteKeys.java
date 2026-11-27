@@ -18,6 +18,11 @@ public class RemoteKeys {
             "다시듣기", "멈추기", "칼로리 경찰", "냉장고 셰프", "주차", "내차", "회의", "길안내", ""};
     static final int[] DEFAULT_ACTS = {0, 2, 5, 6, 1};
 
+    /** 터치(스와이프) 방식 리모컨용 가짜 신호 번호 */
+    public static final int SWIPE_LEFT = 9001, SWIPE_RIGHT = 9002, SWIPE_UP = 9003, SWIPE_DOWN = 9004, TAP = 9005;
+    /** 마지막으로 들어온 신호 (화면 확인용) */
+    public static volatile String lastSignal = "";
+
     /** 배우기 중인 버튼 칸 (-1 = 아님) */
     public static volatile int learnSlot = -1;
     public interface Listener { void onKey(int slot, int code); }
@@ -29,6 +34,13 @@ public class RemoteKeys {
     public static boolean enabled(AppCore c) { return c.prefs.getBoolean("remoteOn", true); }
 
     public static String codeName(int code) {
+        switch (code) {
+            case SWIPE_LEFT: return "터치 밀기 ←";
+            case SWIPE_RIGHT: return "터치 밀기 →";
+            case SWIPE_UP: return "터치 밀기 ↑";
+            case SWIPE_DOWN: return "터치 밀기 ↓";
+            case TAP: return "터치 누르기";
+        }
         String s = KeyEvent.keyCodeToString(code).replace("KEYCODE_", "");
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT: return "방향키 왼쪽";
@@ -50,6 +62,7 @@ public class RemoteKeys {
     /** 이 신호를 앱이 처리할지 (처리하면 true → 다른 앱으로 안 넘김) */
     public static boolean onKey(Context ctx, int code) {
         AppCore c = AppCore.get(ctx);
+        lastSignal = codeName(code) + " (" + code + ")";
         int ls = learnSlot;
         if (ls >= 0) {
             c.prefs.edit().putInt("rk_code_" + ls, code).apply();
@@ -66,6 +79,16 @@ public class RemoteKeys {
             c.log("🎮 리모컨 " + SLOTS[i] + " → " + ACTIONS[a]);
             run(c, ACTION_KEYS[a]);
             return true;
+        }
+        return false;
+    }
+
+    public static boolean isMapped(AppCore c, int code) {
+        if (!enabled(c)) return false;
+        for (int i = 0; i < SLOTS.length; i++) {
+            if (code(c, i) != code) continue;
+            int a = act(c, i);
+            return a >= 0 && a < ACTION_KEYS.length && !ACTION_KEYS[a].isEmpty();
         }
         return false;
     }

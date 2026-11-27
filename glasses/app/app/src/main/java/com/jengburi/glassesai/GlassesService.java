@@ -105,6 +105,8 @@ public class GlassesService extends Service {
                 if (e != null && e.getAction() == KeyEvent.ACTION_DOWN) {
                     int k = e.getKeyCode();
                     core.log("재생 버튼 신호: " + KeyEvent.keyCodeToString(k));
+                    // 반지 리모컨(음악 모드)에서 배우기 중이거나 지정된 버튼이면 리모컨 동작으로
+                    if (RemoteKeys.learnSlot >= 0 || RemoteKeys.isMapped(core, k)) { RemoteKeys.onKey(GlassesService.this, k); return true; }
                     if (k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_HEADSETHOOK
                             || k == KeyEvent.KEYCODE_MEDIA_PLAY || k == KeyEvent.KEYCODE_MEDIA_PAUSE) {
                         core.action("안경 터치", AppCore.parseAction(core.prefs.getString("actPlay", "")));

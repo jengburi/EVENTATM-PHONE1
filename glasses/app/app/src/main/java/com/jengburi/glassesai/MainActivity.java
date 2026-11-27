@@ -58,7 +58,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private View askBtn, photoBtn, convoBtn, listenBtn, meetBtn, againBtn;
     private TextView convoLabel, listenLabel, meetLabel, serviceBtn, statusConn, statusSub, kcalView;
     private ImageView photo;
-    private TextView answer, logView, keyStatus, remoteStatus;
+    private TextView answer, logView, keyStatus, remoteStatus, signalView;
     private final TextView[] slotCode = new TextView[5], slotAct = new TextView[5];
     private LinearLayout historyList;
     private final ScrollView[] pages = new ScrollView[4];
@@ -463,6 +463,9 @@ public class MainActivity extends Activity implements AppCore.Ui {
             catch (Exception e) { toast("접근성 설정을 열지 못했어요"); }
         });
         sw(sr, "리모컨으로 앱 조작하기", "remoteOn", true);
+        signalView = text("📡 들어온 신호: (리모컨 버튼을 눌러 보세요)", 13, ACC, true);
+        signalView.setPadding(0, dp(10), 0, dp(4));
+        sr.addView(signalView);
         for (int i = 0; i < RemoteKeys.SLOTS.length; i++) {
             final int slot = i;
             LinearLayout row = new LinearLayout(this);
@@ -538,6 +541,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
             if (s.length() == 0) s.append(GlassesService.running ? "안경 버튼을 누르거나 아래 버튼을 눌러 보세요" : "오른쪽 버튼으로 안경 대기를 켜 주세요");
             statusSub.setText(s.toString().trim());
             meetLabel.setText(core.features.meetingOn ? "회의 끝내기" : "회의 기록");
+            if (signalView != null && !RemoteKeys.lastSignal.isEmpty() && RemoteService.running) signalView.setText("📡 들어온 신호: " + RemoteKeys.lastSignal);
             meetBtn.setEnabled(!core.busy || core.features.meetingOn);
             meetBtn.setAlpha(meetBtn.isEnabled() ? 1f : 0.4f);
             statusConn.postDelayed(this, 1000);
@@ -676,8 +680,39 @@ public class MainActivity extends Activity implements AppCore.Ui {
         }
     }
 
+    private void showSignal(String s) {
+        if (signalView != null) runOnUiThread(() -> signalView.setText("📡 들어온 신호: " + s));
+    }
+
+    /** 터치(스와이프) 방식 리모컨: 블루투스 기기에서 온 터치만 방향으로 바꿈 */
+    private float tsx, tsy;
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        android.view.InputDevice d = e.getDevice();
+        boolean external = d != null && d.isExternal();
+        if (!external) return super.dispatchTouchEvent(e);
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) { tsx = e.getRawX(); tsy = e.getRawY(); return true; }
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+            float dx = e.getRawX() - tsx, dy = e.getRawY() - tsy;
+            int code;
+            if (Math.abs(dx) < dp(30) && Math.abs(dy) < dp(30)) code = RemoteKeys.TAP;
+            else if (Math.abs(dx) > Math.abs(dy)) code = dx < 0 ? RemoteKeys.SWIPE_LEFT : RemoteKeys.SWIPE_RIGHT;
+            else code = dy < 0 ? RemoteKeys.SWIPE_UP : RemoteKeys.SWIPE_DOWN;
+            showSignal(RemoteKeys.codeName(code) + " · " + d.getName());
+            RemoteKeys.onKey(this, code);
+        }
+        return true;
+    }
+
+    @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent e) {
+        android.view.InputDevice d = e.getDevice();
+        if (d != null && d.isExternal()) showSignal("움직임 신호 (마우스/스크롤) · " + d.getName() + " → 리모컨 모드를 바꿔 보세요");
+        return super.dispatchGenericMotionEvent(e);
+    }
+
     /** 접근성이 꺼져 있을 때: 앱 화면에서 리모컨 버튼 받기 */
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN)
+            showSignal(RemoteKeys.codeName(e.getKeyCode()) + " (" + e.getKeyCode() + ")" + (e.getDevice() != null ? " · " + e.getDevice().getName() : ""));
         if (!RemoteService.running) {
             int code = e.getKeyCode();
             if (e.getAction() == android.view.KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
