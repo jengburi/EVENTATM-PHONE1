@@ -80,7 +80,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
         scroll.addView(col);
 
         TextView title = new TextView(this);
-        title.setText("쟁돌이 AI 안경 컨트롤러");
+        title.setText("쟁부리 AI 안경 컨트롤러");
         title.setTextSize(22);
         col.addView(title);
         batteryView = new TextView(this);
