@@ -58,7 +58,7 @@ public class MainActivity extends Activity implements AppCore.Ui {
     private View askBtn, photoBtn, convoBtn, listenBtn, meetBtn, againBtn;
     private TextView convoLabel, listenLabel, meetLabel, serviceBtn, statusConn, statusSub, kcalView;
     private ImageView photo;
-    private TextView answer, logView;
+    private TextView answer, logView, keyStatus;
     private LinearLayout historyList;
     private final ScrollView[] pages = new ScrollView[4];
     private final TextView[] tabs = new TextView[4];
@@ -337,9 +337,21 @@ public class MainActivity extends Activity implements AppCore.Ui {
         LinearLayout s1 = fold(col, "🔑 기본 설정 (API 키)", core.key().isEmpty());
         TextView paste = wideBtn(s1, "📋 설정 한꺼번에 붙여넣기 (복사해 둔 4줄)");
         paste.setOnClickListener(v -> pasteSettings());
+        keyStatus = text("", 13, SUB, true);
+        keyStatus.setPadding(0, dp(10), 0, 0);
+        s1.addView(keyStatus);
         s1.addView(label("Gemini API 키"));
         keyEdit = edit(s1);
         keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        LinearLayout kr = new LinearLayout(this);
+        s1.addView(kr);
+        smallBtn(kr, "👁 키 보기").setOnClickListener(v -> {
+            boolean hidden = (keyEdit.getInputType() & InputType.TYPE_TEXT_VARIATION_PASSWORD) == InputType.TYPE_TEXT_VARIATION_PASSWORD;
+            keyEdit.setInputType(InputType.TYPE_CLASS_TEXT | (hidden ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD : InputType.TYPE_TEXT_VARIATION_PASSWORD));
+            keyEdit.setSelection(keyEdit.getText().length());
+        });
+        smallBtn(kr, "💾 저장").setOnClickListener(v -> { saveFields(); updateKeyStatus(); toast("저장했어요"); });
+        smallBtn(kr, "✅ 키 테스트").setOnClickListener(v -> testKey());
         s1.addView(label("모델 이름 (쉼표로 여러 개, 앞에서부터 시도)"));
         modelEdit = edit(s1);
         paidBox = sw(s1, "💳 결제한 키 사용 중 (통역·대답 더 빠르게)", "paidKey", false);
@@ -521,12 +533,13 @@ public class MainActivity extends Activity implements AppCore.Ui {
         for (int i = 0; i < GAINS.length; i++) if (Math.abs(GAINS[i] - g) < 0.01) gainChips.select(i, false);
         mapChips.select(core.prefs.getString("mapApp", "네이버").contains("구글") ? 1 : 0, false);
         updateKcal();
+        updateKeyStatus();
     }
 
     private void saveFields() {
         if (keyEdit == null) return;
         core.prefs.edit()
-                .putString("key", keyEdit.getText().toString().trim())
+                .putString("key", keyEdit.getText().toString().replaceAll("\\s", ""))
                 .putString("uploadUrl", uploadUrlEdit.getText().toString().trim())
                 .putString("wakeWord", wakeEdit.getText().toString().trim().isEmpty() ? "쟁부리야" : wakeEdit.getText().toString().trim())
                 .putString("uploadKey", uploadKeyEdit.getText().toString().trim())
@@ -589,6 +602,46 @@ public class MainActivity extends Activity implements AppCore.Ui {
             loadFields();
             toast(n > 0 ? "✅ 설정 " + n + "개를 넣었어요" : "넣을 설정을 찾지 못했어요. '키=…' 형식인지 확인해 주세요.");
         } catch (Exception e) { toast("붙여넣기 실패: " + e.getMessage()); }
+    }
+
+    private void updateKeyStatus() {
+        String k = core.key();
+        if (k.isEmpty()) { keyStatus.setText("❌ 저장된 키가 없어요"); keyStatus.setTextColor(RED); return; }
+        String shown = k.length() > 10 ? k.substring(0, 5) + "…" + k.substring(k.length() - 4) : k;
+        keyStatus.setText("🔑 저장된 키: " + shown + "  (" + k.length() + "글자)");
+        keyStatus.setTextColor(TXT);
+    }
+
+    /** 키를 저장하고 Gemini에 짧게 물어봐서 되는지 확인 */
+    private void testKey() {
+        // 붙여넣을 때 섞여 들어간 공백·줄바꿈·따옴표 제거
+        String k = keyEdit.getText().toString().replaceAll("[\\s\"'`]", "");
+        if (k.startsWith("키=")) k = k.substring(2);
+        keyEdit.setText(k);
+        saveFields();
+        updateKeyStatus();
+        if (k.isEmpty()) { toast("키를 먼저 넣어 주세요"); return; }
+        keyStatus.setText("⏳ 키 확인 중…");
+        final String key = k;
+        new Thread(() -> {
+            String msg; int color;
+            try {
+                String a = Gemini.askWithRetry(key, core.models(), "'연결 성공'이라고만 답해.", null, null, core::log);
+                msg = "✅ 키가 잘 돼요! (" + (Gemini.lastFallbackModel != null ? Gemini.lastFallbackModel : core.models().split(",")[0].trim()) + ") " + a.trim();
+                color = GREEN;
+            } catch (Exception e) {
+                String m = String.valueOf(e.getMessage());
+                String why = m.contains("400") && (m.contains("API_KEY") || m.toLowerCase().contains("key")) ? "키가 틀렸거나 잘렸어요. AI 스튜디오에서 다시 복사해 주세요."
+                        : m.contains("403") ? "이 키는 권한이 없어요. AI 스튜디오에서 'Generative Language API'가 켜진 키인지 확인해 주세요."
+                        : m.contains("429") ? "키는 맞는데 사용 한도에 걸렸어요 (무료 한도이거나 결제 잔액 부족)."
+                        : m.contains("404") ? "키는 맞는데 모델 이름이 없어요. 모델 칸을 gemini-3.8-flash 로 바꿔 보세요."
+                        : "인터넷 연결이나 키를 확인해 주세요.";
+                msg = "❌ " + why + "\n(" + (m.length() > 120 ? m.substring(0, 120) : m) + ")";
+                color = RED;
+            }
+            String fm = msg; int fc = color;
+            runOnUiThread(() -> { keyStatus.setText(fm); keyStatus.setTextColor(fc); });
+        }).start();
     }
 
     private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
