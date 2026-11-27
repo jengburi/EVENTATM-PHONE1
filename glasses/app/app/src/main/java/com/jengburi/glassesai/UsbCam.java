@@ -130,6 +130,8 @@ public class UsbCam {
             try { return captureCamera2(ctx, ext, log); }
             catch (Exception e) { log.log("외부 카메라 방식 실패: " + e.getMessage() + " → 직접 연결로 다시 시도"); }
         }
+        try { return captureHelper(ctx, log); }
+        catch (Exception e) { log.log("USB 방법2 실패: " + e.getMessage() + " → 방법3 시도"); }
         Exception last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
             try { return captureUvc(ctx, log, attempt == 1); }
@@ -138,7 +140,101 @@ public class UsbCam {
         throw last;
     }
 
-    /** 방법 2: USB로 직접 연결 (UVC) */
+    /** 방법 2: 라이브러리의 카메라 도우미 (예제 앱과 같은 방식, 화면 처리 포함) */
+    static byte[] captureHelper(Context ctx, GlassesBle.Log log) throws Exception {
+        HandlerThread ht = new HandlerThread("usbcam-helper");
+        ht.start();
+        Handler h = new Handler(ht.getLooper());
+        CountDownLatch done = new CountDownLatch(1);
+        final byte[][] out = {null};
+        final byte[][] latest = {null};
+        final String[] err = {null};
+        final int[] dims = {640, 480};
+        final int[] n = {0};
+        final boolean[] selected = {false};
+        final com.herohan.uvcapp.CameraHelper[] helper = {null};
+        try {
+            h.post(() -> {
+                try {
+                    com.herohan.uvcapp.CameraHelper hp = new com.herohan.uvcapp.CameraHelper();
+                    helper[0] = hp;
+                    hp.setStateCallback(new com.herohan.uvcapp.ICameraHelper.StateCallback() {
+                        @Override public void onAttach(UsbDevice d) { if (!selected[0]) { selected[0] = true; hp.selectDevice(d); } }
+                        @Override public void onDeviceOpen(UsbDevice d, boolean first) {
+                            UVCParam prm = new UVCParam();
+                            try { prm.setQuirks(UVCCamera.getRecommendedPlatformQuirks()); } catch (Throwable ignored) { }
+                            hp.openCamera(prm);
+                        }
+                        @Override public void onCameraOpen(UsbDevice d) {
+                            try {
+                                Size ps = hp.getPreviewSize();
+                                if (ps != null) { dims[0] = ps.width; dims[1] = ps.height; }
+                                log.log("USB 방법2: 카메라 열림 " + dims[0] + "×" + dims[1]);
+                                hp.setFrameCallback(frame -> {
+                                    if (out[0] != null) return;
+                                    byte[] nv = new byte[frame.remaining()];
+                                    frame.get(nv);
+                                    latest[0] = nv;
+                                    fixDims(dims, nv.length);
+                                    if (++n[0] == 1) log.log("USB 카메라 영상 들어옴");
+                                    if (n[0] >= 10) { out[0] = toJpeg(nv, dims); done.countDown(); }
+                                }, UVCCamera.PIXEL_FORMAT_NV21);
+                                hp.startPreview();
+                                // 영상 콜백이 안 오면 라이브러리 사진 찍기로
+                                h.postDelayed(() -> {
+                                    if (out[0] != null || latest[0] != null) return;
+                                    log.log("USB 방법2: 사진 찍기 기능으로 시도");
+                                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                                    hp.takePicture(new com.herohan.uvcapp.IImageCapture.OutputFileOptions.Builder(bo).build(),
+                                            new com.herohan.uvcapp.IImageCapture.OnImageCaptureCallback() {
+                                                @Override public void onImageSaved(com.herohan.uvcapp.IImageCapture.OutputFileResults r) {
+                                                    if (out[0] == null && bo.size() > 0) { out[0] = bo.toByteArray(); done.countDown(); }
+                                                }
+                                                @Override public void onError(int code, String msg, Throwable t) { err[0] = "사진 찍기 실패: " + msg; }
+                                            });
+                                }, 3000);
+                            } catch (Exception e) { err[0] = e.getMessage(); done.countDown(); }
+                        }
+                        @Override public void onCameraClose(UsbDevice d) { }
+                        @Override public void onDeviceClose(UsbDevice d) { }
+                        @Override public void onDetach(UsbDevice d) { err[0] = "USB 카메라가 빠졌어요"; done.countDown(); }
+                        @Override public void onCancel(UsbDevice d) { err[0] = "USB 카메라 사용을 허용하지 않았어요"; done.countDown(); }
+                        @Override public void onError(UsbDevice d, com.herohan.uvcapp.CameraException e) { err[0] = "카메라 오류 " + e.getCode(); done.countDown(); }
+                    });
+                    // 이미 꽂혀 있는 경우 직접 고르기
+                    h.postDelayed(() -> {
+                        if (selected[0]) return;
+                        List<UsbDevice> l = hp.getDeviceList();
+                        if (l != null && !l.isEmpty()) { selected[0] = true; hp.selectDevice(l.get(0)); }
+                        else { err[0] = "도우미가 USB 카메라를 못 찾았어요"; done.countDown(); }
+                    }, 800);
+                } catch (Throwable e) { err[0] = String.valueOf(e.getMessage()); done.countDown(); }
+            });
+            if (!done.await(12, TimeUnit.SECONDS)) {
+                if (latest[0] != null) { log.log("USB 카메라: 마지막으로 받은 장면을 사용"); return toJpeg(latest[0], dims); }
+                throw new Exception(err[0] != null ? err[0] : "영상이 오지 않아요 (시간 초과)");
+            }
+            if (out[0] == null) throw new Exception(err[0] != null ? err[0] : "사진을 못 받았어요");
+            return out[0];
+        } finally {
+            CountDownLatch closed = new CountDownLatch(1);
+            h.post(() -> {
+                try { if (helper[0] != null) { helper[0].setFrameCallback(null, 0); helper[0].stopPreview(); helper[0].closeCamera(); helper[0].release(); } } catch (Throwable ignored) { }
+                closed.countDown();
+            });
+            closed.await(3, TimeUnit.SECONDS);
+            ht.quitSafely();
+        }
+    }
+
+    static byte[] toJpeg(byte[] nv21, int[] d) {
+        YuvImage y = new YuvImage(nv21, ImageFormat.NV21, d[0], d[1], null);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        y.compressToJpeg(new Rect(0, 0, d[0], d[1]), 90, bo);
+        return bo.toByteArray();
+    }
+
+    /** 방법 3: USB로 직접 연결 (UVC) */
     static byte[] captureUvc(Context ctx, GlassesBle.Log log, boolean small) throws Exception {
         UsbDevice dev = find(ctx);
         if (dev == null) throw new Exception("USB 카메라가 꽂혀 있지 않아요. 내시경·웹캠을 휴대폰에 꽂아 주세요");
