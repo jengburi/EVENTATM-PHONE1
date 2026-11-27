@@ -585,22 +585,27 @@ public class MainActivity extends Activity implements AppCore.Ui {
             android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
             CharSequence clip = cm.hasPrimaryClip() ? cm.getPrimaryClip().getItemAt(0).coerceToText(this) : null;
             if (clip == null) { toast("복사된 글이 없어요. 4줄을 먼저 복사해 주세요."); return; }
+            String all = clip.toString();
             int n = 0;
+            StringBuilder got = new StringBuilder();
             android.content.SharedPreferences.Editor ed = core.prefs.edit();
-            for (String raw : clip.toString().split("\\r?\\n")) {
-                String line = raw.trim();
-                if (line.isEmpty()) continue;
-                String k = "", val = line;
-                int eq = line.indexOf('=');
-                if (eq > 0) { k = line.substring(0, eq).trim(); val = line.substring(eq + 1).trim(); }
-                if (k.contains("키") && !k.contains("비밀") || val.startsWith("AIza") || val.startsWith("AQ.")) { ed.putString("key", val); n++; }
-                else if (k.contains("모델") || val.startsWith("gemini")) { ed.putString("model", val); n++; }
-                else if (k.contains("주소") || val.startsWith("https://script.google.com")) { ed.putString("uploadUrl", val); n++; }
-                else if (k.contains("비밀")) { ed.putString("uploadKey", val); n++; }
+            // 줄바꿈이 사라져 한 줄로 붙어 와도 되도록, 모양으로 각각 찾기
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(AIza[0-9A-Za-z_\\-]{20,}|AQ\\.[0-9A-Za-z_\\-\\.]{20,})").matcher(all);
+            if (m.find()) { ed.putString("key", m.group(1)); n++; got.append("키 "); }
+            m = java.util.regex.Pattern.compile("(https://script\\.google\\.com/macros/s/[0-9A-Za-z_\\-]+/exec)").matcher(all);
+            if (m.find()) { ed.putString("uploadUrl", m.group(1)); n++; got.append("업로드주소 "); }
+            m = java.util.regex.Pattern.compile("비밀\\s*(?:코드|번호)?\\s*[=:：]\\s*([0-9A-Za-z_\\-]+)").matcher(all);
+            if (m.find()) { ed.putString("uploadKey", m.group(1)); n++; got.append("비밀코드 "); }
+            m = java.util.regex.Pattern.compile("(gemini[0-9A-Za-z_\\-\\.]*)").matcher(all);
+            StringBuilder models = new StringBuilder();
+            while (m.find()) {
+                String g = m.group(1).replaceAll("[\\.\\-]+$", "");
+                if (models.indexOf(g) < 0) models.append(models.length() == 0 ? "" : ", ").append(g);
             }
+            if (models.length() > 0) { ed.putString("model", models.toString()); n++; got.append("모델 "); }
             ed.apply();
             loadFields();
-            toast(n > 0 ? "✅ 설정 " + n + "개를 넣었어요" : "넣을 설정을 찾지 못했어요. '키=…' 형식인지 확인해 주세요.");
+            toast(n > 0 ? "✅ " + n + "개 넣었어요: " + got.toString().trim() : "넣을 설정을 찾지 못했어요. 4줄을 다시 복사해 주세요.");
         } catch (Exception e) { toast("붙여넣기 실패: " + e.getMessage()); }
     }
 
