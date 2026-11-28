@@ -120,13 +120,15 @@ public class Cam {
     }
 
     /** 지금 보이는 장면을 JPEG 로 (없으면 null) */
-    public byte[] snapshot() {
+    public byte[] snapshot() { return snapshot(88); }
+
+    public byte[] snapshot(int quality) {
         byte[] nv = latest;
         if (nv == null) return null;
         int w = dims[0], hh = dims[1];
         YuvImage y = new YuvImage(nv, ImageFormat.NV21, w, hh, null);
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        y.compressToJpeg(new Rect(0, 0, w, hh), 88, bo);
+        y.compressToJpeg(new Rect(0, 0, w, hh), quality, bo);
         return bo.toByteArray();
     }
 

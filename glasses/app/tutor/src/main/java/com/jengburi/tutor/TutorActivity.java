@@ -55,7 +55,10 @@ public class TutorActivity extends Activity {
     private int graded = 0, gradedRight = 0;
 
     private TextView status, answer, logView, watchLabel, keyStatus;
-    private View watchBtn;
+    private View watchBtn, liveBtn;
+    private TextView liveTitle;
+    private LiveTutor live;
+    private final java.util.LinkedList<String> liveLines = new java.util.LinkedList<>();
     private EditText keyEdit, modelEdit;
     private final StringBuilder logBuf = new StringBuilder();
     private final List<View> actionBtns = new ArrayList<>();
@@ -89,6 +92,7 @@ public class TutorActivity extends Activity {
         super.onPause();
         saveKey();
         watching = false;
+        if (live != null) live.running = false;
         cam.stop();
         if (watchLabel != null) watchLabel.setText("지켜보기 켜기");
     }
@@ -122,6 +126,12 @@ public class TutorActivity extends Activity {
         pv.addView(surf, new FrameLayout.LayoutParams(-1, -1));
         int w = getResources().getDisplayMetrics().widthPixels - dp(32);
         col.addView(pv, new LinearLayout.LayoutParams(-1, w * 9 / 16));
+
+        // 라이브 과외 (계속 보면서 대화)
+        liveBtn = bigTile(col, "🔴", "라이브 과외 시작", "웹캠을 계속 보면서 말로 바로바로 대화해요");
+        liveTitle = (TextView) ((LinearLayout) ((LinearLayout) liveBtn).getChildAt(1)).getChildAt(0);
+        ((LinearLayout) liveBtn).setBackground(press(0xFFFF5A5F, 24));
+        liveBtn.setOnClickListener(v -> toggleLive());
 
         // 큰 버튼: 질문하기
         View ask = bigTile(col, "🎤", "선생님께 질문하기", "\"이 문제 어떻게 풀어?\" \"이 단어 뜻이 뭐야?\"");
@@ -185,7 +195,7 @@ public class TutorActivity extends Activity {
         logView = text("", 12, SUB, false);
         logView.setTextIsSelectable(true);
         lg.addView(logView);
-        TextView ver = text("쟁부리 AI 과외 1.0 · 개인이 만든 무료 앱 · AI 대답은 틀릴 수 있어요", 11, SUB, false);
+        TextView ver = text("쟁부리 AI 과외 1.1 · 개인이 만든 무료 앱 · AI 대답은 틀릴 수 있어요", 11, SUB, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(12), 0, 0);
         col.addView(ver);
@@ -283,6 +293,39 @@ public class TutorActivity extends Activity {
         }
         session.add("채점 → " + head + " / " + clean);
         return head + "\n" + clean;
+    }
+
+    private void toggleLive() {
+        saveKey();
+        if (key().isEmpty()) { toast("먼저 설정에서 Gemini API 키를 넣어 주세요"); return; }
+        if (live != null && live.running) { live.running = false; liveTitle.setText("라이브 과외 시작"); return; }
+        if (!cam.isOpen()) toast("웹캠 화면이 아직 없어요. 화면 없이 대화만 할게요");
+        watching = false; watchLabel.setText("지켜보기 켜기");
+        if (ttsReady) tts.stop();
+        liveLines.clear();
+        liveTitle.setText("■ 라이브 과외 끝내기");
+        setButtons(false);
+        answer.setText("라이브 연결 중…");
+        live = new LiveTutor(this, prefs, cam, this::log, new LiveTutor.Ui() {
+            @Override public void onText(String who, String t) {
+                boolean teacher = who.equals("teacher");
+                session.add((teacher ? "라이브 선생님: " : "라이브 학생: ") + t);
+                synchronized (liveLines) {
+                    liveLines.add((teacher ? "👩‍🏫 " : "🧑 ") + t);
+                    while (liveLines.size() > 8) liveLines.removeFirst();
+                }
+                String all = String.join("\n\n", liveLines);
+                runOnUiThread(() -> answer.setText(all));
+                if (teacher && !live.isAudio() && prefs.getBoolean("speak", true)) say(t);
+            }
+            @Override public void onState(String s) { runOnUiThread(() -> { status.setText(s); log(s); }); }
+        });
+        String level = LEVELS[prefs.getInt("level", 2)];
+        boolean give = prefs.getBoolean("giveAnswer", false);
+        new Thread(() -> {
+            live.run(level, give);
+            runOnUiThread(() -> { liveTitle.setText("라이브 과외 시작"); setButtons(true); status.setText(cam.isOpen() ? "📷 웹캠 연결됨" : "웹캠을 꽂아 주세요"); });
+        }).start();
     }
 
     private void toggleWatch() {
