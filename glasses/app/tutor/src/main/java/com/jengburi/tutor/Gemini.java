@@ -1,0 +1,191 @@
+package com.jengburi.tutor;
+
+import android.util.Base64;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+
+/** Google Gemini API 로 사진 + 질문을 보내고 답을 받는다. */
+public class Gemini {
+    /** 자동으로 찾아 성공한 모델 이름 (없으면 null). */
+    public static volatile String lastFallbackModel;
+
+    /** 503/429(혼잡)이면 잠시 쉬고 재시도, 모델 칸에 쉼표로 여러 개 적으면 차례로 시도. */
+    public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, LogSink log) throws Exception {
+        return askWithRetry(apiKey, models, prompt, jpeg, null, log);
+    }
+
+    public static String askWithRetry(String apiKey, String models, String prompt, byte[] jpeg, byte[] wav, LogSink log) throws Exception {
+        Exception last = null;
+        for (String model : models.split(",")) {
+            model = model.trim();
+            if (model.isEmpty()) continue;
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                long t0 = System.currentTimeMillis();
+                try {
+                    String a = ask(apiKey, model, prompt, jpeg, wav);
+                    log.log(model + " 응답 " + String.format("%.1f", (System.currentTimeMillis() - t0) / 1000.0) + "초");
+                    return a;
+                } catch (Exception e) {
+                    last = e;
+                    String m = String.valueOf(e.getMessage());
+                    boolean busy = m.contains(" 503") || m.contains(" 429") || m.contains(" 500") || m.contains("timeout") || m.contains("timed out");
+                    if (!busy || attempt == 2) {
+                        java.util.regex.Matcher cm = java.util.regex.Pattern.compile("오류 (\\d{3})").matcher(m);
+                        String code = cm.find() ? cm.group(1) : "";
+                        String why = code.equals("429") ? "무료 한도 초과" : code.equals("503") ? "서버 혼잡" : code.equals("404") ? "없는 모델" : code.isEmpty() ? "응답 없음" : "오류 " + code;
+                        log.log(model + " 실패 (" + why + ") → 다음 모델");
+                        break;
+                    }
+                    log.log(model + " 혼잡 → 1.5초 후 한 번 더");
+                    Thread.sleep(1500L);
+                }
+            }
+        }
+        // 적어 둔 모델이 모두 혼잡/없음이면, 내 키로 쓸 수 있는 flash 계열 모델을 찾아 차례로 시도
+        try {
+            java.util.List<String> avail = listFlashModels(apiKey);
+            log.log("쓸 수 있는 모델: " + avail);
+            int tried = 0;
+            for (String m : avail) {
+                if (models.contains(m)) continue;
+                if (++tried > 5) break;
+                try {
+                    log.log(m + " 로 시도");
+                    String a = ask(apiKey, m, prompt, jpeg, wav);
+                    log.log("성공한 모델: " + m + " (다음부터 이 모델을 먼저 사용)");
+                    lastFallbackModel = m;
+                    return a;
+                } catch (Exception e) { last = e; log.log(m + " 실패: " + e.getMessage()); }
+            }
+        } catch (Exception e) { log.log("모델 목록 조회 실패: " + e.getMessage()); }
+        throw last != null ? last : new Exception("모델 이름이 비어 있어요");
+    }
+
+    /** generateContent 를 지원하는 flash 계열 모델 이름 목록 (최신 우선). */
+    public static java.util.List<String> listFlashModels(String apiKey) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(
+                "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").openConnection();
+        c.setRequestProperty("x-goog-api-key", apiKey);
+        c.setConnectTimeout(15000); c.setReadTimeout(20000);
+        InputStream in = c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream();
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192]; int n;
+        while (in != null && (n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        JSONArray arr = new JSONObject(bo.toString("UTF-8")).getJSONArray("models");
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject m = arr.getJSONObject(i);
+            String name = m.optString("name").replace("models/", "");
+            String methods = String.valueOf(m.optJSONArray("supportedGenerationMethods"));
+            if (name.contains("flash") && methods.contains("generateContent")
+                    && !name.contains("tts") && !name.contains("image") && !name.contains("audio")
+                    && !name.contains("live") && !name.contains("embedding")) out.add(name);
+        }
+        java.util.Collections.sort(out, java.util.Collections.reverseOrder());
+        return out;
+    }
+
+    public static String ask(String apiKey, String model, String prompt, byte[] jpeg) throws Exception {
+        return ask(apiKey, model, prompt, jpeg, null);
+    }
+
+    /** 글자가 조금씩 도착할 때마다 받는 곳 (스트리밍). 스레드마다 따로 설정. */
+    public interface TextSink { void onText(String delta); }
+    public static final ThreadLocal<TextSink> SINK = new ThreadLocal<>();
+    /** 이 모델이 생각 설정(thinkingConfig)을 거부하면 true */
+    static volatile boolean noThinkingCfg;
+
+    public static String ask(String apiKey, String model, String prompt, byte[] jpeg, byte[] wav) throws Exception {
+        try {
+            return askOnce(apiKey, model, prompt, jpeg, wav, !noThinkingCfg);
+        } catch (Exception e) {
+            String m = String.valueOf(e.getMessage()).toLowerCase();
+            if (!noThinkingCfg && m.contains(" 400") && m.contains("think")) {
+                noThinkingCfg = true;
+                return askOnce(apiKey, model, prompt, jpeg, wav, false);
+            }
+            throw e;
+        }
+    }
+
+    static String askOnce(String apiKey, String model, String prompt, byte[] jpeg, byte[] wav, boolean thinkLow) throws Exception {
+        JSONArray parts0 = new JSONArray().put(new JSONObject().put("text", prompt));
+        if (jpeg != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
+                .put("mime_type", "image/jpeg")
+                .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))));
+        if (wav != null) parts0.put(new JSONObject().put("inline_data", new JSONObject()
+                .put("mime_type", "audio/wav")
+                .put("data", Base64.encodeToString(wav, Base64.NO_WRAP))));
+        JSONObject body = new JSONObject().put("contents", new JSONArray()
+                .put(new JSONObject().put("parts", parts0)));
+        if (thinkLow) body.put("generationConfig", new JSONObject()
+                .put("thinkingConfig", new JSONObject().put("thinkingLevel", "low")));
+
+        TextSink sink = SINK.get();
+        String method = sink != null ? ":streamGenerateContent?alt=sse" : ":generateContent";
+        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
+                + URLEncoder.encode(model, "UTF-8") + method);
+        HttpURLConnection c = (HttpURLConnection) url.openConnection();
+        c.setRequestMethod("POST");
+        c.setConnectTimeout(15000); c.setReadTimeout(30000);
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json");
+        c.setRequestProperty("x-goog-api-key", apiKey);
+        try (OutputStream o = c.getOutputStream()) { o.write(body.toString().getBytes("UTF-8")); }
+        int code = c.getResponseCode();
+        InputStream in = code < 400 ? c.getInputStream() : c.getErrorStream();
+        if (code >= 400) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192]; int n;
+            while (in != null && (n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            String resp = bo.toString("UTF-8");
+            String msg = resp;
+            try { msg = new JSONObject(resp).getJSONObject("error").getString("message"); } catch (Exception ignored) { }
+            throw new Exception("Gemini 오류 " + code + ": " + msg);
+        }
+        if (sink == null) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            return textOf(new JSONObject(bo.toString("UTF-8"))).trim();
+        }
+        // 스트리밍: "data: {...}" 줄마다 글자 조각이 옴
+        StringBuilder all = new StringBuilder();
+        java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(in, "UTF-8"));
+        String line;
+        while ((line = r.readLine()) != null) {
+            if (!line.startsWith("data:")) continue;
+            String json = line.substring(5).trim();
+            if (json.isEmpty()) continue;
+            try {
+                String t = textOf(new JSONObject(json));
+                if (!t.isEmpty()) { all.append(t); sink.onText(t); }
+            } catch (Exception ignored) { }
+        }
+        return all.toString().trim();
+    }
+
+    static String textOf(JSONObject resp) throws Exception {
+        JSONArray cands = resp.optJSONArray("candidates");
+        if (cands == null || cands.length() == 0) return "";
+        JSONObject content = cands.getJSONObject(0).optJSONObject("content");
+        if (content == null) return "";
+        JSONArray parts = content.optJSONArray("parts");
+        if (parts == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length(); i++) {
+            JSONObject p = parts.getJSONObject(i);
+            if (p.optBoolean("thought", false)) continue; // 생각 내용은 빼기
+            sb.append(p.optString("text"));
+        }
+        return sb.toString();
+    }
+}
