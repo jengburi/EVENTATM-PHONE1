@@ -55,7 +55,11 @@ public class TutorActivity extends Activity {
     private int graded = 0, gradedRight = 0;
 
     private TextView status, answer, logView, watchLabel, keyStatus;
-    private View watchBtn, liveBtn;
+    private View watchBtn, liveBtn, checkBtn;
+    private TextView checkTitle;
+    private volatile boolean checking;
+    /** 문제 번호 → 지금까지 체크한 보기들 (틀린 순서대로), 맞혔으면 끝에 "OK" */
+    private final java.util.LinkedHashMap<String, java.util.List<String>> marks = new java.util.LinkedHashMap<>();
     private TextView liveTitle;
     private LiveTutor live;
     private final java.util.LinkedList<String> liveLines = new java.util.LinkedList<>();
@@ -92,6 +96,8 @@ public class TutorActivity extends Activity {
         super.onPause();
         saveKey();
         watching = false;
+        checking = false;
+        if (checkTitle != null) checkTitle.setText("체크 확인 켜기");
         if (live != null) live.running = false;
         cam.stop();
         if (watchLabel != null) watchLabel.setText("지켜보기 켜기");
@@ -133,6 +139,12 @@ public class TutorActivity extends Activity {
         ((LinearLayout) liveBtn).setBackground(press(0xFFFF5A5F, 24));
         liveBtn.setOnClickListener(v -> toggleLive());
 
+        // 체크 확인 (객관식): 보기에 체크하면 바로 맞았는지 알려 줌
+        checkBtn = bigTile(col, "☑️", "체크 확인 켜기", "책 보기에 체크하면 바로 채점 · 틀리면 이유 + 다시 생각");
+        checkTitle = (TextView) ((LinearLayout) ((LinearLayout) checkBtn).getChildAt(1)).getChildAt(0);
+        ((LinearLayout) checkBtn).setBackground(press(GREEN, 24));
+        checkBtn.setOnClickListener(v -> toggleCheck());
+
         // 큰 버튼: 질문하기
         View ask = bigTile(col, "🎤", "선생님께 질문하기", "\"이 문제 어떻게 풀어?\" \"이 단어 뜻이 뭐야?\"");
         ask.setOnClickListener(v -> run("질문", this::askVoice));
@@ -153,7 +165,7 @@ public class TutorActivity extends Activity {
 
         LinearLayout r3 = new LinearLayout(this);
         col.addView(r3);
-        smallBtn(r3, "🔄 새 문제").setOnClickListener(v -> { hintLevel = 0; lastWatch = ""; toast("새 문제로 넘어갈게요 (힌트 처음부터)"); });
+        smallBtn(r3, "🔄 새 문제").setOnClickListener(v -> { hintLevel = 0; lastWatch = ""; synchronized (marks) { marks.clear(); } toast("새 페이지로 넘어갈게요 (체크 기록·힌트 처음부터)"); });
         smallBtn(r3, "🔇 멈추기").setOnClickListener(v -> { if (ttsReady) tts.stop(); Mic.cancel = true; });
         smallBtn(r3, "📝 오늘 리포트").setOnClickListener(v -> run("리포트", this::report));
 
@@ -195,7 +207,7 @@ public class TutorActivity extends Activity {
         logView = text("", 12, SUB, false);
         logView.setTextIsSelectable(true);
         lg.addView(logView);
-        TextView ver = text("쟁부리 AI 과외 1.1 · 개인이 만든 무료 앱 · AI 대답은 틀릴 수 있어요", 11, SUB, false);
+        TextView ver = text("쟁부리 AI 과외 1.2 · 개인이 만든 무료 앱 · AI 대답은 틀릴 수 있어요", 11, SUB, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(12), 0, 0);
         col.addView(ver);
@@ -301,6 +313,7 @@ public class TutorActivity extends Activity {
         if (live != null && live.running) { live.running = false; liveTitle.setText("라이브 과외 시작"); return; }
         if (!cam.isOpen()) toast("웹캠 화면이 아직 없어요. 화면 없이 대화만 할게요");
         watching = false; watchLabel.setText("지켜보기 켜기");
+        checking = false; checkTitle.setText("체크 확인 켜기");
         if (ttsReady) tts.stop();
         liveLines.clear();
         liveTitle.setText("■ 라이브 과외 끝내기");
@@ -328,10 +341,79 @@ public class TutorActivity extends Activity {
         }).start();
     }
 
+    private void toggleCheck() {
+        saveKey();
+        if (key().isEmpty()) { toast("먼저 설정에서 Gemini API 키를 넣어 주세요"); return; }
+        checking = !checking;
+        checkTitle.setText(checking ? "■ 체크 확인 끄기" : "체크 확인 켜기");
+        if (!checking) { log("체크 확인 끝"); return; }
+        if (watching) { watching = false; watchLabel.setText("지켜보기 켜기"); }
+        say("보기에 체크하면 바로 알려 줄게요");
+        log("☑️ 체크 확인 시작");
+        new Thread(() -> {
+            String lastSeen = "";
+            while (checking) {
+                try { Thread.sleep(4000); } catch (InterruptedException ignored) { }
+                if (!checking) break;
+                if (busy || (ttsReady && tts.isSpeaking())) continue;
+                byte[] j = cam.snapshot();
+                if (j == null) continue;
+                try {
+                    String known;
+                    synchronized (marks) {
+                        StringBuilder k = new StringBuilder();
+                        for (java.util.Map.Entry<String, java.util.List<String>> e : marks.entrySet())
+                            k.append(e.getKey()).append("번 문제: 이미 확인한 체크 ").append(e.getValue()).append("\n");
+                        known = k.length() == 0 ? "아직 없음" : k.toString();
+                    }
+                    String p = base() + "학생이 책(문제집)의 객관식 보기에 펜으로 체크(동그라미, V표, 밑줄, 색칠)를 해. 사진에서 체크 표시를 찾아.\n"
+                            + "이미 확인한 체크 (이건 다시 보고하지 마):\n" + known
+                            + "\n새로 생긴 체크가 하나도 없으면 다른 말 없이 NONE 이라고만 답해.\n"
+                            + "새 체크가 있으면 가장 최근(아직 확인 안 한) 것 하나만, 아래 한 줄 JSON으로만 답해 (다른 말 금지):\n"
+                            + "{\"problem\":\"문제번호\",\"marked\":\"학생이 체크한 보기 번호\",\"correct\":\"정답 보기 번호\",\"why_wrong\":\"체크한 보기가 틀렸다면 왜 틀렸는지 한 문장\",\"hint\":\"정답을 말하지 않는 짧은 힌트 한 문장\",\"explain\":\"정답인 이유 한두 문장\"}\n"
+                            + "문제를 직접 풀어서 정답을 정해. 체크인지 확실하지 않으면 NONE.";
+                    String a = Gemini.askWithRetry(key(), models(), p, j, null, this::log).trim();
+                    if (a.toUpperCase().startsWith("NONE") || !a.contains("{")) continue;
+                    org.json.JSONObject r = new org.json.JSONObject(a.substring(a.indexOf('{'), a.lastIndexOf('}') + 1));
+                    String prob = r.optString("problem").replaceAll("[^0-9]", ""), mk = r.optString("marked").replaceAll("[^0-9]", ""), ok = r.optString("correct").replaceAll("[^0-9]", "");
+                    if (prob.isEmpty() || mk.isEmpty()) continue;
+                    String sig = prob + ":" + mk;
+                    if (sig.equals(lastSeen)) continue; // 같은 체크를 두 번 말하지 않기
+                    lastSeen = sig;
+                    java.util.List<String> tries;
+                    synchronized (marks) {
+                        tries = marks.computeIfAbsent(prob, x -> new ArrayList<>());
+                        if (tries.contains(mk) || tries.contains("OK")) continue;
+                        tries.add(mk);
+                    }
+                    String msg;
+                    if (!ok.isEmpty() && mk.equals(ok)) {
+                        synchronized (marks) { tries.add("OK"); }
+                        msg = "⭕ " + prob + "번, 맞았어요! " + r.optString("explain");
+                        graded++; gradedRight++;
+                    } else if (tries.size() < 2) {
+                        msg = "❌ " + prob + "번, " + mk + "번은 아니에요. " + r.optString("why_wrong") + " " + r.optString("hint") + " 한 번 더 생각해 봐요.";
+                    } else {
+                        synchronized (marks) { tries.add("OK"); }
+                        msg = "💡 " + prob + "번, 아쉬워요. 정답은 " + ok + "번이에요. " + r.optString("explain");
+                        graded++;
+                        saveWrongNote(j, prob + "번 문제 — 체크: " + tries + ", 정답 " + ok + "번. " + r.optString("explain"));
+                    }
+                    session.add("체크 확인 → " + msg);
+                    show(msg, true);
+                } catch (Exception e) {
+                    log("체크 확인 오류: " + e.getMessage());
+                    if (String.valueOf(e.getMessage()).contains("429")) { try { Thread.sleep(30000); } catch (InterruptedException ignored) { } }
+                }
+            }
+        }).start();
+    }
+
     private void toggleWatch() {
         saveKey();
         if (key().isEmpty()) { toast("먼저 설정에서 Gemini API 키를 넣어 주세요"); return; }
         watching = !watching;
+        if (watching && checking) { checking = false; checkTitle.setText("체크 확인 켜기"); }
         watchLabel.setText(watching ? "■ 지켜보기 끄기" : "지켜보기 켜기");
         if (!watching) { log("지켜보기 끝"); return; }
         int sec = WATCH_SEC[prefs.getInt("watchIdx", 1)];
